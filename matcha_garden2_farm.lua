@@ -417,7 +417,15 @@ local function autoSellLoop()
       hrp.CFrame = CFrame.new(sellTp.Position.X, sellTp.Position.Y + 3, sellTp.Position.Z)
       task.wait(0.5)
       keypress(VK_E); task.wait(0.2); keyrelease(VK_E)
-      task.wait(0.6)
+      task.wait(0.8)
+      for _ = 1, 20 do mousescroll(120); task.wait(0.02) end
+      task.wait(0.3)
+      moveMouse(960, 740)
+      task.wait(0.2)
+      mousescroll(-2)
+      task.wait(0.3)
+      moveMouse(1776, 172)
+      task.wait(0.05); mouse1click(); task.wait(0.3)
     end
     task.wait(2)
   end
