@@ -57,7 +57,7 @@ local function D(typ, props)
 end
 
 local uiPos   = Vector2.new(150, 120)
-local uiSize  = Vector2.new(330, 226)
+local uiSize  = Vector2.new(330, 196)
 local dragging = false
 local dragOff = Vector2.new(0, 0)
 local lastM1  = false
@@ -68,7 +68,7 @@ local TopBar   = D("Square", {Size = Vector2.new(uiSize.X, 30), Color = Color3.f
 local AccLine  = D("Square", {Size = Vector2.new(uiSize.X, 2), Color = Color3.fromRGB(0,200,120), Filled = true, Visible = true})
 local TitleTxt = D("Text",   {Text = "FARM // GROW A GARDEN 2", Size = 13, Color = Color3.fromRGB(0,200,120), Outline = true, Visible = true, Font = Drawing.Fonts.System})
 
-local MAXS = 7
+local MAXS = 5
 local SLabel, SCheck, SFill = {}, {}, {}
 for i = 1, MAXS do
   SLabel[i] = D("Text",   {Text = "", Size = 13, Color = Color3.fromRGB(190,190,195), Outline = true, Visible = false, Font = Drawing.Fonts.System})
@@ -85,12 +85,9 @@ local function feat(key, label, kind)
 end
 
 feat("AutoHarvest", "AUTO HARVEST",     "toggle")
-feat("AutoSell",    "AUTO SELL",        "toggle")
+feat("AutoSell",    "AUTO SELL (SOON)", "soon")
 feat("AutoLoot",    "AUTO LOOT",        "toggle")
 feat("AutoSteal",   "AUTO STEAL",       "toggle")
-feat("ForceHarvest","FORCE HARVEST NOW","action")
-feat("ForceSell",   "FORCE SELL NOW",   "action")
-feat("ForceBuy",    "BUY",              "action")
 
 local function fVal(key)
   for _, f in ipairs(F) do if f.key == key then return f.value end end
@@ -149,11 +146,12 @@ local function scanHarvestCache(plot)
   local plants = plot and plot:FindFirstChild("Plants")
   if not plants then return end
   for _, plant in ipairs(plants:GetChildren()) do
-    for _, desc in ipairs(plant:GetDescendants()) do
-      if desc.Name == "HarvestPrompt" and desc:IsA("ProximityPrompt") then
-        local hp = desc.Parent
-        if hp and hp:IsA("BasePart") then
-          table.insert(harvestCache, hp)
+    local fruits = plant:FindFirstChild("Fruits")
+    if fruits then
+      for _, fruit in ipairs(fruits:GetChildren()) do
+        local base = fruit:FindFirstChild("Base")
+        if base and base:IsA("BasePart") then
+          table.insert(harvestCache, base)
         end
       end
     end
@@ -161,13 +159,22 @@ local function scanHarvestCache(plot)
 end
 
 local function doHarvest()
-  local harvested = {}
+  local hrp = getHRP()
+  if not hrp then return end
   for _, hp in ipairs(harvestCache) do
-    if hp and hp.Parent and not harvested[hp] then
+    if not fVal("AutoHarvest") then break end
+    if hp and hp.Parent then
       local ok, cf = pcall(function() return hp.CFrame end)
       if ok and cf then
-        harvested[hp] = true
-        tryCollect(hp); task.wait(0.08)
+        local standPos = cf * CFrame.new(0, 0.5, -2)
+        hrp.CFrame = standPos
+        keypress(VK_E)
+        for _ = 1, 4 do
+          if not fVal("AutoHarvest") then break end
+          hrp.CFrame = standPos
+          task.wait(0.02)
+        end
+        keyrelease(VK_E)
       end
     end
   end
@@ -238,6 +245,7 @@ local function doLoot()
   local hrp = getHRP()
   if not hrp then return end
   for _, item in ipairs(di:GetChildren()) do
+    if not fVal("AutoLoot") then break end
     local anchor = item:FindFirstChild("PromptAnchor")
     if anchor and anchor:IsA("BasePart") then
       local ok, cf = pcall(function() return anchor.CFrame end)
@@ -245,7 +253,10 @@ local function doLoot()
         hrp.CFrame = cf * CFrame.new(0, 1, 0)
         task.wait(0.1)
         keypress(VK_E)
-        task.wait(1.2)
+        for _ = 1, 24 do
+          if not fVal("AutoLoot") then break end
+          task.wait(0.05)
+        end
         keyrelease(VK_E)
         lootCount = lootCount + 1
       end
@@ -293,15 +304,23 @@ end
 
 local function doSteal()
   scanStealCache()
-  if #stealCache == 0 then return end
+  if #stealCache == 0 then print("[Steal] 0 fruits on other plots"); return end
   print("[Steal] " .. #stealCache .. " fruits found on other plots")
   local hrp = getHRP()
   if not hrp then return end
   for i, target in ipairs(stealCache) do
+    if not fVal("AutoSteal") then break end
     local ok, cf = pcall(function() return target.part.CFrame end)
     if ok and cf then
-      hrp.CFrame = cf * CFrame.new(0, 0.3, 0)
-      keypress(VK_E); keyrelease(VK_E)
+      local standPos = cf * CFrame.new(0, 0.5, -2)
+      hrp.CFrame = standPos
+      keypress(VK_E)
+      for _ = 1, 4 do
+        if not fVal("AutoSteal") then break end
+        hrp.CFrame = standPos
+        task.wait(0.02)
+      end
+      keyrelease(VK_E)
       stolenCount = stolenCount + 1
       if i % 20 == 0 and target.spawn then
         hrp.CFrame = target.spawn * CFrame.new(0, 3, 0)
@@ -325,9 +344,17 @@ task.spawn(function()
   print("[Farm] Cached " .. #harvestCache .. " harvest targets")
 
   local prevHarvest = false
+  local cam = workspace.CurrentCamera
   while ScriptActive do
     local harvesting = fVal("AutoHarvest")
-    if harvesting then task.wait(0.08) else task.wait(0.5) end
+    if harvesting then
+      pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
+      pcall(function() cam.CFrame = CFrame.new(Vector3.new(0, 75, 0), Vector3.new(0, 0, 0)) end)
+      task.wait(0.08)
+    else
+      if prevHarvest then pcall(function() cam.CameraType = Enum.CameraType.Custom end) end
+      task.wait(0.5)
+    end
     if not plot or not plot.Parent then plot = findPlot() end
     if plot then
       if prevHarvest and not harvesting then
@@ -347,50 +374,14 @@ task.spawn(function()
           return
         end
       end
-      if selling then doSell() end
+      if selling and false then doSell() end
       if fVal("AutoLoot") then doLoot() end
       if fVal("AutoSteal") and getPhase() == "Night" then doSteal() end
     end
   end
 end)
 
--- Actions
-local function forceHarvestNow()
-  local plot = findPlot()
-  if not plot then safeNotify("No plot", "Error", 2); return end
-  scanHarvestCache(plot); doHarvest()
-  safeNotify("Harvest done", "Force", 2)
-end
-
-local function forceSellNow()
-  doSell()
-  safeNotify("Sell triggered", "Force", 2)
-end
-
-local function forceBuyNow()
-  local hrp = getHRP()
-  if not hrp then safeNotify("No character", "Error", 2); return end
-  local savedPos = hrp.CFrame
-  local seeds = workspace:FindFirstChild("Teleports") and workspace.Teleports:FindFirstChild("Seeds")
-  if not seeds or not seeds:IsA("BasePart") then safeNotify("Seeds teleport not found", "Error", 2); return end
-  local ok, cf = pcall(function() return seeds.CFrame end)
-  if not ok or not cf then safeNotify("Bad CFrame", "Error", 2); return end
-  hrp.CFrame = cf
-  for _ = 1, 5 do
-    keypress(VK_E)
-    task.wait(0.02)
-    keyrelease(VK_E)
-    task.wait(0.02)
-  end
-  hrp.CFrame = savedPos
-  safeNotify("Buy menu opened", "BUY", 2)
-end
-
-local ActionMap = {
-  ForceHarvest = forceHarvestNow,
-  ForceSell    = forceSellNow,
-  ForceBuy     = forceBuyNow,
-}
+local ActionMap = {}
 
 local function Render()
   Shadow.Position  = Vector2.new(uiPos.X - 3, uiPos.Y - 3)
@@ -406,7 +397,7 @@ local function Render()
       local yy = uiPos.Y + 38 + ((slot-1) * 28)
       SLabel[slot].Text = (f.kind == "action") and (">> " .. f.label) or ("> " .. f.label)
       SLabel[slot].Position = Vector2.new(uiPos.X + 16, yy)
-      SLabel[slot].Color = (f.kind == "action") and Color3.fromRGB(255,200,80) or ((f.value) and Color3.fromRGB(120,255,120) or Color3.fromRGB(190,190,195))
+      SLabel[slot].Color = (f.kind == "action") and Color3.fromRGB(255,200,80) or (f.kind == "soon") and Color3.fromRGB(120,120,120) or ((f.value) and Color3.fromRGB(120,255,120) or Color3.fromRGB(190,190,195))
       SLabel[slot].Visible = true
       SCheck[slot].Position = Vector2.new(uiPos.X + uiSize.X - 22, yy + 7)
       SCheck[slot].Visible = (f.kind == "toggle")
@@ -442,8 +433,12 @@ task.spawn(function()
           if mx >= uiPos.X + 10 and mx <= uiPos.X + uiSize.X - 10 and my >= yy - 2 and my <= yy + 22 then
             if f.kind == "toggle" then
               f.value = not f.value
-              print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value))
-              safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF"), "Toggle", 2)
+              local extra = ""
+              if f.key == "AutoSteal" and f.value then extra = " [" .. getPhase() .. "]" end
+              print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value) .. extra)
+              safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF") .. extra, "Toggle", 2)
+            elseif f.kind == "soon" then
+              safeNotify("Coming soon!", "WIP", 2)
             elseif f.kind == "action" then
               print("[UI] ACTION: " .. f.key)
               local handler = ActionMap[f.key]
@@ -470,9 +465,10 @@ end)
 
 _G.MatchaCleanup = function()
   ScriptActive = false
+  pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
   for _, obj in ipairs(drawObjs) do pcall(function() obj:Remove() end) end
   print("[Farm] Cleanup done")
 end
 
 safeNotify("Farm Hub loaded!", "Garden 2", 3)
-print("[Farm] AUTO HARVEST + AUTO SELL + AUTO LOOT + AUTO STEAL + BUY ready")
+print("[Farm] AUTO HARVEST + AUTO SELL + AUTO LOOT + AUTO STEAL ready")
