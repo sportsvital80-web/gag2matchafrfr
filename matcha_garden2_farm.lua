@@ -89,7 +89,7 @@ end
 feat("AutoHarvest", "AUTO HARVEST",     "toggle")
 feat("AutoBuy",     "AUTO BUY",         "toggle")
 feat("AutoLoot",    "AUTO LOOT",        "toggle")
-feat("AutoSell",     "AUTO SELL",  "toggle")
+feat("AutoSell",     "AUTO SELL",         "toggle")
 feat("ForceBuy",    "BUY",              "action")
 
 local function fVal(key)
@@ -100,6 +100,21 @@ end
 -- Farm logic
 local VK_E = 0x45
 local gardens = workspace:FindFirstChild("Gardens")
+local INV_MAX = 80
+
+local function countItems()
+  local ok, gui = pcall(function()
+    return player.PlayerGui:FindFirstChild("BackpackGui") and player.PlayerGui.BackpackGui:FindFirstChild("Backpack") and player.PlayerGui.BackpackGui.Backpack:FindFirstChild("Inventory") and player.PlayerGui.BackpackGui.Backpack.Inventory:FindFirstChild("ScrollingFrame") and player.PlayerGui.BackpackGui.Backpack.Inventory.ScrollingFrame:FindFirstChild("UIGridFrame")
+  end)
+  if not ok or not gui then return 0 end
+  local n = 0
+  for _, c in ipairs(gui:GetChildren()) do
+    if c:IsA("Frame") then n = n + 1 end
+  end
+  local real = math.max(0, n - 10)
+  print("[Items] raw=" .. n .. " real=" .. real)
+  return real
+end
 
 local function findPlot()
   for _, p in ipairs(gardens:GetChildren()) do
@@ -127,17 +142,19 @@ local function doHarvest()
   local hrp = getHRP()
   if not hrp then return end
   for _, hp in ipairs(harvestCache) do
-    if not fVal("AutoHarvest") then break end
+    if not fVal("AutoHarvest") or countItems() >= INV_MAX then break end
     if hp and hp.Parent then
       local ok, cf = pcall(function() return hp.CFrame end)
       if ok and cf then
         local tp = cf * CFrame.new(0, 1, 0)
         local sc = hrp.CFrame
         for t = 0, 1, 0.1 do
-          if not fVal("AutoHarvest") then break end
+          if not fVal("AutoHarvest") or countItems() >= INV_MAX then break end
           hrp.CFrame = sc:Lerp(tp, t); task.wait()
         end
-        hrp.CFrame = tp; keypress(VK_E); task.wait(); keyrelease(VK_E)
+        if countItems() < INV_MAX then
+          hrp.CFrame = tp; keypress(VK_E); task.wait(); keyrelease(VK_E)
+        end
       end
     end
   end
@@ -410,8 +427,7 @@ end
 local function autoSellLoop()
   safeNotify("AutoSell started!", "AutoSell", 3)
   local sellTp = workspace:FindFirstChild("Teleports") and workspace.Teleports:FindFirstChild("Sell")
-  while asRun do
-    if not asRun then break end
+  while asRun and fVal("AutoSell") do
     local hrp = getHRP()
     if hrp and sellTp then
       hrp.CFrame = CFrame.new(sellTp.Position.X, sellTp.Position.Y + 3, sellTp.Position.Z)
@@ -426,8 +442,9 @@ local function autoSellLoop()
       task.wait(0.3)
       moveMouse(1776, 172)
       task.wait(0.05); mouse1click(); task.wait(0.3)
+      break
     end
-    task.wait(2)
+    task.wait(1)
   end
   asRun = false
   asTh = nil
@@ -449,6 +466,7 @@ task.spawn(function()
 
   local prevHarvest = false
   local cam = workspace.CurrentCamera
+  local soldCycle = false
   while ScriptActive do
     local harvesting = fVal("AutoHarvest")
     if harvesting then
@@ -467,14 +485,32 @@ task.spawn(function()
       end
       prevHarvest = harvesting
       if harvesting then
-        scanHarvest(plot); doHarvest()
-        hCyc = hCyc + 1
-        if hCyc >= MCYC and RSRC then
-          print("[Farm] Auto-restart after " .. hCyc .. " cycles")
-          _G.MatchaCleanup()
-          task.wait(1)
-          task.spawn(loadstring(RSRC))
-          return
+        local items = countItems()
+        if items >= INV_MAX and not soldCycle then
+          soldCycle = true
+          harvesting = false
+          pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+          if abRun then abRun = false; if abTh then task.cancel(abTh); abTh = nil end end
+          if fVal("AutoSell") then
+            asRun = true; asTh = task.spawn(autoSellLoop)
+            while asRun and fVal("AutoSell") do task.wait(0.5) end
+            asRun = false
+          end
+          if fVal("AutoBuy") then
+            abRun = true; abTh = task.spawn(autoBuyLoop)
+            while abRun and fVal("AutoBuy") do task.wait(0.5) end
+          end
+        else
+          soldCycle = false
+          scanHarvest(plot); doHarvest()
+          hCyc = hCyc + 1
+          if hCyc >= MCYC and RSRC then
+            print("[Farm] Auto-restart after " .. hCyc .. " cycles")
+            _G.MatchaCleanup()
+            task.wait(1)
+            task.spawn(loadstring(RSRC))
+            return
+          end
         end
       end
       if fVal("AutoBuy") and not abRun then
@@ -483,13 +519,6 @@ task.spawn(function()
       elseif not fVal("AutoBuy") and abRun then
         abRun = false
         if abTh then task.cancel(abTh); abTh = nil end
-      end
-      if fVal("AutoSell") and not asRun then
-        asRun = true
-        asTh = task.spawn(autoSellLoop)
-      elseif not fVal("AutoSell") and asRun then
-        asRun = false
-        if asTh then task.cancel(asTh); asTh = nil end
       end
       if autoPet and not ptRun then
         scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
