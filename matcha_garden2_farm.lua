@@ -57,26 +57,52 @@ local function D(typ, props)
   return obj
 end
 
+-- UI colors
+local C_ACCENT = Color3.fromRGB(0, 212, 170)
+local C_ACCENT2 = Color3.fromRGB(0, 180, 140)
+local C_BG = Color3.fromRGB(14, 14, 22)
+local C_TOP = Color3.fromRGB(24, 24, 38)
+local C_TEXT = Color3.fromRGB(225, 225, 235)
+local C_DIM = Color3.fromRGB(100, 100, 115)
+local C_TOFF = Color3.fromRGB(55, 55, 72)
+local C_ACTN = Color3.fromRGB(255, 186, 76)
+local C_SOON = Color3.fromRGB(110, 110, 126)
+local C_HOV = Color3.fromRGB(28, 28, 44)
+local C_SEP = Color3.fromRGB(30, 30, 48)
+local C_SHD = Color3.fromRGB(0, 0, 0)
+
 local uiPos   = Vector2.new(150, 120)
-local uiSize  = Vector2.new(330, 196)
+local ROW_H = 28
+local TOP_H = 32
+local ACC_H = 2
+local SEP_H = 1
+local STAT_H = 14
+local MAXS = 5
+local uiSize  = Vector2.new(340, TOP_H + ACC_H + MAXS * ROW_H + 6 + SEP_H + 8 + STAT_H + 6)
 local dragging = false
 local dragOff = Vector2.new(0, 0)
 local lastM1  = false
+local hoverSlot = 0
+local animVal = {}
 
-local Shadow   = D("Square", {Size = Vector2.new(uiSize.X+6, uiSize.Y+6), Color = Color3.fromRGB(0,0,0), Transparency = 0.35, Filled = true, Visible = true})
-local MainBG   = D("Square", {Size = uiSize, Color = Color3.fromRGB(12,12,16), Filled = true, Visible = true})
-local TopBar   = D("Square", {Size = Vector2.new(uiSize.X, 30), Color = Color3.fromRGB(22,22,28), Filled = true, Visible = true})
-local AccLine  = D("Square", {Size = Vector2.new(uiSize.X, 2), Color = Color3.fromRGB(0,200,120), Filled = true, Visible = true})
-local TitleTxt = D("Text",   {Text = "FARM // GROW A GARDEN 2", Size = 13, Color = Color3.fromRGB(0,200,120), Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local Shadow   = D("Square", {Size = Vector2.new(uiSize.X + 8, uiSize.Y + 8), Color = C_SHD, Transparency = 0.4, Filled = true, Visible = true})
+local MainBG   = D("Square", {Size = uiSize, Color = C_BG, Filled = true, Visible = true})
+local BorderL  = D("Square", {Size = Vector2.new(1, uiSize.Y), Color = C_SEP, Filled = true, Visible = true})
+local BorderR  = D("Square", {Size = Vector2.new(1, uiSize.Y), Color = C_SEP, Filled = true, Visible = true})
+local TopBar   = D("Square", {Size = Vector2.new(uiSize.X, TOP_H), Color = C_TOP, Filled = true, Visible = true})
+local AccLine  = D("Square", {Size = Vector2.new(uiSize.X, ACC_H), Color = C_ACCENT, Filled = true, Visible = true})
+local TitleTxt = D("Text",   {Text = "FARM HUB v2", Size = 14, Color = C_ACCENT, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local SubTxt   = D("Text",   {Text = "grow a garden 2", Size = 9, Color = C_DIM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
 
-local MAXS = 5
 local SLabel, SCheck, SFill = {}, {}, {}
 for i = 1, MAXS do
-  SLabel[i] = D("Text",   {Text = "", Size = 13, Color = Color3.fromRGB(190,190,195), Outline = true, Visible = false, Font = Drawing.Fonts.System})
-  SCheck[i] = D("Circle", {Radius = 6, Thickness = 2, Color = Color3.fromRGB(0,200,120), Filled = false, Visible = false})
-  SFill[i]  = D("Circle", {Radius = 3, Color = Color3.fromRGB(0,200,120), Filled = true, Visible = false})
+  SLabel[i] = D("Text",   {Text = "", Size = 13, Color = C_TEXT, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+  SCheck[i] = D("Circle", {Radius = 8, Thickness = 2, Color = C_TOFF, Filled = false, Visible = false})
+  SFill[i]  = D("Circle", {Radius = 5, Color = C_ACCENT, Filled = true, Visible = false})
+  animVal[i] = 0
 end
-local StatusTxt = D("Text", {Text = "", Size = 11, Color = Color3.fromRGB(70,70,80), Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local SepLine  = D("Square", {Size = Vector2.new(uiSize.X - 24, SEP_H), Color = C_SEP, Filled = true, Visible = true})
+local StatusTxt = D("Text", {Text = "", Size = 11, Color = C_DIM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
 
 local F = {}
 local function feat(key, label, kind)
@@ -580,35 +606,74 @@ local ActionMap = {
 }
 
 local function Render()
-  Shadow.Position  = Vector2.new(uiPos.X - 3, uiPos.Y - 3)
-  MainBG.Position  = uiPos
-  TopBar.Position  = uiPos
-  AccLine.Position = Vector2.new(uiPos.X, uiPos.Y + 30)
-  TitleTxt.Position = Vector2.new(uiPos.X + 10, uiPos.Y + 8)
+  local x0, y0 = uiPos.X, uiPos.Y
+  Shadow.Position  = Vector2.new(x0 - 4, y0 - 4)
+  MainBG.Position  = Vector2.new(x0, y0)
+  BorderL.Position = Vector2.new(x0 - 1, y0)
+  BorderR.Position = Vector2.new(x0 + uiSize.X, y0)
+  TopBar.Position  = Vector2.new(x0, y0)
+  AccLine.Position = Vector2.new(x0, y0 + TOP_H)
+  TitleTxt.Position = Vector2.new(x0 + 14, y0 + 8)
+  SubTxt.Position   = Vector2.new(x0 + 14, y0 + 22)
 
-  local slot = 0
-  for _, f in ipairs(F) do
-    slot = slot + 1
-    if slot <= MAXS then
-      local yy = uiPos.Y + 38 + ((slot-1) * 28)
-      SLabel[slot].Text = (f.kind == "action") and (">> " .. f.label) or ("> " .. f.label)
-      SLabel[slot].Position = Vector2.new(uiPos.X + 16, yy)
-      SLabel[slot].Color = (f.kind == "action") and Color3.fromRGB(255,200,80) or (f.kind == "soon") and Color3.fromRGB(120,120,120) or ((f.value) and Color3.fromRGB(120,255,120) or Color3.fromRGB(190,190,195))
-      SLabel[slot].Visible = true
-      SCheck[slot].Position = Vector2.new(uiPos.X + uiSize.X - 22, yy + 7)
-      SCheck[slot].Visible = (f.kind == "toggle")
-      SFill[slot].Position = SCheck[slot].Position
-      SFill[slot].Visible = (f.kind == "toggle" and f.value == true)
+  local yy0 = y0 + TOP_H + ACC_H + 3
+  for slot = 1, MAXS do
+    local f = F[slot]
+    if not f then
+      SLabel[slot].Visible = false; SCheck[slot].Visible = false; SFill[slot].Visible = false
+      continue
+    end
+    local yy = yy0 + (slot - 1) * ROW_H
+
+    local isHover = (hoverSlot == slot)
+    local lblColor = C_TEXT
+    if f.kind == "action" then lblColor = C_ACTN
+    elseif f.kind == "soon" then lblColor = C_SOON
+    elseif f.value then lblColor = C_ACCENT
+    end
+
+    local txt = "   " .. f.label
+    if f.kind == "action" then txt = ">> " .. f.label end
+
+    SLabel[slot].Text = txt
+    SLabel[slot].Position = Vector2.new(x0 + 16, yy)
+    if isHover then
+      if f.kind == "action" then SLabel[slot].Color = Color3.fromRGB(255, 210, 120)
+      elseif f.value then SLabel[slot].Color = C_ACCENT2
+      else SLabel[slot].Color = C_TEXT end
+    else
+      SLabel[slot].Color = lblColor
+    end
+    SLabel[slot].Visible = true
+
+    if f.kind == "toggle" then
+      SCheck[slot].Position = Vector2.new(x0 + uiSize.X - 26, yy + 7)
+      SCheck[slot].Color = f.value and C_ACCENT or C_TOFF
+      SCheck[slot].Visible = true
+      SFill[slot].Position = Vector2.new(x0 + uiSize.X - 26, yy + 7)
+      if f.value then
+        animVal[slot] = math.min(1, animVal[slot] + 0.08)
+      else
+        animVal[slot] = math.max(0, animVal[slot] - 0.08)
+      end
+      if animVal[slot] > 0.01 then
+        SFill[slot].Visible = true
+        SFill[slot].Radius = 1 + animVal[slot] * 4
+        SFill[slot].Color = C_ACCENT:Lerp(C_TOFF, 1 - animVal[slot])
+      else
+        SFill[slot].Visible = false
+      end
+    else
+      SCheck[slot].Visible = false; SFill[slot].Visible = false
     end
   end
-  for i = slot + 1, MAXS do
-    SLabel[i].Visible = false; SCheck[i].Visible = false; SFill[i].Visible = false
-  end
 
+  SepLine.Position = Vector2.new(x0 + 12, y0 + uiSize.Y - STAT_H - 10)
   local hrp = getHRP()
   local yStr = hrp and tostring(math.floor(hrp.Position.Y)) or "?"
-  StatusTxt.Text = "Y:" .. yStr .. " | Loot:" .. lootCount .. " Steal:" .. stolenCount .. " | Buy:" .. (autoBuyRunning and "ON" or "OFF") .. " | " .. currentPhase
-  StatusTxt.Position = Vector2.new(uiPos.X + 10, uiPos.Y + uiSize.Y - 16)
+  local phaseIcon = (currentPhase == "Night") and "~" or (currentPhase == "Day") and "#" or "?"
+  StatusTxt.Text = "Y " .. yStr .. "  |  L " .. lootCount .. "  S " .. stolenCount .. "  B " .. (autoBuyRunning and "ON" or "OFF") .. "  " .. phaseIcon
+  StatusTxt.Position = Vector2.new(x0 + 14, y0 + uiSize.Y - STAT_H - 4)
 end
 
 task.spawn(function()
@@ -620,30 +685,37 @@ task.spawn(function()
     local m1 = false
     pcall(function() m1 = ismouse1pressed() end)
 
+    local yy0 = uiPos.Y + TOP_H + ACC_H + 3
+    hoverSlot = 0
+    for slot = 1, MAXS do
+      local yy = yy0 + (slot - 1) * ROW_H
+      if mx >= uiPos.X + 8 and mx <= uiPos.X + uiSize.X - 8 and my >= yy - 4 and my <= yy + ROW_H then
+        hoverSlot = slot
+        break
+      end
+    end
+
     if m1 and not lastM1 then
-      local slot = 0
-      for _, f in ipairs(F) do
-        slot = slot + 1
-        if slot <= MAXS then
-          local yy = uiPos.Y + 38 + ((slot-1) * 28)
-          if mx >= uiPos.X + 10 and mx <= uiPos.X + uiSize.X - 10 and my >= yy - 2 and my <= yy + 22 then
-            if f.kind == "toggle" then
-              f.value = not f.value
-              local extra = ""
-              if f.key == "AutoSteal" and f.value then extra = " [" .. getPhase() .. "]" end
-              print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value) .. extra)
-              safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF") .. extra, "Toggle", 2)
-            elseif f.kind == "soon" then
-              safeNotify("Coming soon!", "WIP", 2)
-            elseif f.kind == "action" then
-              print("[UI] ACTION: " .. f.key)
-              local handler = ActionMap[f.key]
-              if handler then task.spawn(handler) end
-            end
+      for slot = 1, MAXS do
+        local f = F[slot]
+        local yy = yy0 + (slot - 1) * ROW_H
+        if mx >= uiPos.X + 8 and mx <= uiPos.X + uiSize.X - 8 and my >= yy - 4 and my <= yy + ROW_H then
+          if f.kind == "toggle" then
+            f.value = not f.value
+            local extra = ""
+            if f.key == "AutoSteal" and f.value then extra = " [" .. getPhase() .. "]" end
+            print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value) .. extra)
+            safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF") .. extra, "Toggle", 2)
+          elseif f.kind == "soon" then
+            safeNotify("Coming soon!", "WIP", 2)
+          elseif f.kind == "action" then
+            print("[UI] ACTION: " .. f.key)
+            local handler = ActionMap[f.key]
+            if handler then task.spawn(handler) end
           end
         end
       end
-      if mx >= uiPos.X and mx <= uiPos.X + uiSize.X and my >= uiPos.Y and my <= uiPos.Y + 30 then
+      if mx >= uiPos.X and mx <= uiPos.X + uiSize.X and my >= uiPos.Y and my <= uiPos.Y + TOP_H then
         dragging = true
         dragOff = Vector2.new(mx - uiPos.X, my - uiPos.Y)
       end
