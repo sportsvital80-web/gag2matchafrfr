@@ -89,7 +89,7 @@ end
 feat("AutoHarvest", "AUTO HARVEST",     "toggle")
 feat("AutoBuy",     "AUTO BUY",         "toggle")
 feat("AutoLoot",    "AUTO LOOT",        "toggle")
-feat("AutoSell",     "AUTO SELL",         "toggle")
+feat("AutoSell",     "AUTO SELL (SOON)",  "toggle")
 feat("ForceBuy",    "BUY",              "action")
 
 local function fVal(key)
@@ -312,7 +312,11 @@ end
 local function ferm(fr)
   if not fr then return end
   local ok, b = pcall(function() return fr.Header.ExitButton end)
-  if ok and b then clk(b) end
+  if ok and b then
+    local p, s = b.AbsolutePosition, b.AbsoluteSize
+    moveMouse(p.X + s.X / 2, p.Y + s.Y / 2 + 8)
+    task.wait(0.05); mouse1click(); task.wait(0.05)
+  end
 end
 
 local function attRst()
@@ -411,6 +415,9 @@ local function autoSellLoop()
     local hrp = getHRP()
     if hrp and sellTp then
       hrp.CFrame = CFrame.new(sellTp.Position.X, sellTp.Position.Y + 3, sellTp.Position.Z)
+      task.wait(0.5)
+      keypress(VK_E); task.wait(0.2); keyrelease(VK_E)
+      task.wait(0.6)
     end
     task.wait(2)
   end
@@ -725,4 +732,4 @@ _G.MatchaCleanup = function()
 end
 
 safeNotify("Farm loaded!", "Garden 2", 3)
-print("[Farm] HARVEST + BUY + SELL + LOOT + PET ready")
+print("ready")
