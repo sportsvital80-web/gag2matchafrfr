@@ -89,7 +89,7 @@ end
 feat("AutoHarvest", "AUTO HARVEST",     "toggle")
 feat("AutoBuy",     "AUTO BUY",         "toggle")
 feat("AutoLoot",    "AUTO LOOT",        "toggle")
-feat("AutoSteal",   "AUTO STEAL (SOON)", "soon")
+feat("AutoSell",     "AUTO SELL",         "toggle")
 feat("ForceBuy",    "BUY",              "action")
 
 local function fVal(key)
@@ -244,6 +244,8 @@ end
 -- Auto Buy
 local abRun = false
 local abTh = nil
+local asRun = false
+local asTh = nil
 
 local function num(t)
   if not t or type(t) ~= "string" then return 0 end
@@ -268,47 +270,49 @@ local function prix(mf)
   return ok and num(t) or 0
 end
 
-local function gClk(o)
+local function moveMouse(x, y)
+  local cx, cy = 0, 0
+  pcall(function() local m = player:GetMouse(); cx = m.X; cy = m.Y end)
+  local dx, dy = x - cx, y - cy
+  local dist = math.sqrt(dx * dx + dy * dy)
+  local steps = math.max(3, math.min(12, math.floor(dist / 40)))
+  for i = 1, steps do
+    local t = i / steps
+    mousemoveabs(cx + dx * t, cy + dy * t)
+    task.wait(0.008)
+  end
+end
+
+local function clk(o)
   if not o then return end
   local p, s = o.AbsolutePosition, o.AbsoluteSize
-  if s.X <= 0 or s.Y <= 0 then return end
-  mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
-  task.wait(0.02); mouse1click(); task.wait(0.02)
+  moveMouse(p.X + s.X / 2, p.Y + s.Y / 2)
+  task.wait(0.05); mouse1click(); task.wait(0.05)
 end
 
 local function rScrl(sh)
+  if not sh then return end
   local ok = pcall(function() sh.CanvasPosition = Vector2.new(0, 0) end)
   if not ok then
     local p, s = sh.AbsolutePosition, sh.AbsoluteSize
-    if s.X > 0 and s.Y > 0 then
-      mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
-      task.wait(0.1)
-      for _ = 1, 20 do mousescroll(10); task.wait(0.05) end
-    end
+    mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
+    task.wait(0.1)
+    for _ = 1, 20 do mousescroll(10); task.wait(0.03) end
   end
 end
 
-local function sclv(sh, it, idx)
-  if not sh then return end
-  local ok = pcall(function()
-    local ry = sh.CanvasPosition.Y + (it.AbsolutePosition.Y - sh.AbsolutePosition.Y)
-    sh.CanvasPosition = Vector2.new(0, math.max(0, ry))
+local function scrlv(sh, it)
+  pcall(function()
+    local y = sh.CanvasPosition.Y + (it.AbsolutePosition.Y - sh.AbsolutePosition.Y)
+    sh.CanvasPosition = Vector2.new(0, math.max(0, y))
   end)
-  if not ok then
-    local p, s = sh.AbsolutePosition, sh.AbsoluteSize
-    if s.X > 0 and s.Y > 0 then
-      mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
-      task.wait(0.05)
-      mousescroll(10); task.wait(0.05)
-    end
-  end
-  task.wait(0.15)
+  task.wait(0.1)
 end
 
 local function ferm(fr)
   if not fr then return end
   local ok, b = pcall(function() return fr.Header.ExitButton end)
-  if ok and b then gClk(b) end
+  if ok and b then clk(b) end
 end
 
 local function attRst()
@@ -331,30 +335,30 @@ local function achtt(fr)
   local tot = 0
   for _, nm in pairs({"NormalShop", "ExclusiveShop"}) do
     if not abRun then return tot end
-    local sh0 = fr:FindFirstChild(nm)
-    if not sh0 then continue end
-    local ok, bb = pcall(function() return sh0.Sheckles_Shelf.Main_Frame.Buttons.BuyButton end)
+    local sh = fr:FindFirstChild(nm)
+    if not sh then continue end
+    local ok, bb = pcall(function() return sh.Sheckles_Shelf.Main_Frame.Buttons.BuyButton end)
     if not ok or not bb then continue end
-    rScrl(sh0); task.wait(0.2)
-    local kids = sh0:GetChildren()
-    for idx, it in ipairs(kids) do
+    rScrl(sh); task.wait(0.2)
+    for _, it in pairs(sh:GetChildren()) do
       if not abRun then ferm(fr); return tot end
       if it.Name == "Sheckles_Shelf" or it.Name == "Robux_Shelf" or it.Name == "ItemTemplate" then continue end
-      local sh = fr:FindFirstChild(nm) or sh0
       local mf = it:FindFirstChild("Main_Frame")
       if not mf then continue end
       local sb = mf:FindFirstChild("TextButton")
       if not sb then continue end
-      sclv(sh, it, idx); gClk(sb); task.wait(0.5)
+      scrlv(sh, it); clk(sb); task.wait(0.5)
       if not abRun then ferm(fr); return tot end
       local px, sk = prix(mf), stk(mf)
-      print("[AB] "..it.Name.." #"..idx.." px="..px.." sk="..sk)
-      if px <= 0 or sk <= 0 then task.wait(0.2); continue end
+      if px <= 0 or sk <= 0 then task.wait(0.15); continue end
       if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
       for _ = 1, sk do
         if not abRun then ferm(fr); return tot end
         if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
-        gClk(bb); tot = tot + 1; print("[AB] bought "..it.Name.." #"..tot); task.wait(0.15)
+        local bp, bs = bb.AbsolutePosition, bb.AbsoluteSize
+        moveMouse(bp.X + bs.X / 2, bp.Y + bs.Y / 2 + 10)
+        task.wait(0.05); mouse1click(); task.wait(0.15)
+        tot = tot + 1
       end
       task.wait(0.2)
     end
@@ -382,7 +386,7 @@ local function ouvr()
       hrp.CFrame = CFrame.new(sp.X, sp.Y + 1, sp.Z + 3)
     end
   until fr ~= nil or att >= 3
-  task.wait(0.5)
+  task.wait(1)
   return fr
 end
 
@@ -397,6 +401,22 @@ local function autoBuyLoop()
   abRun = false
   abTh = nil
   safeNotify("AutoBuy stopped!", "AutoBuy", 3)
+end
+
+local function autoSellLoop()
+  safeNotify("AutoSell started!", "AutoSell", 3)
+  local sellTp = workspace:FindFirstChild("Teleports") and workspace.Teleports:FindFirstChild("Sell")
+  while asRun do
+    if not asRun then break end
+    local hrp = getHRP()
+    if hrp and sellTp then
+      hrp.CFrame = CFrame.new(sellTp.Position.X, sellTp.Position.Y + 3, sellTp.Position.Z)
+    end
+    task.wait(2)
+  end
+  asRun = false
+  asTh = nil
+  safeNotify("AutoSell stopped!", "AutoSell", 3)
 end
 
 -- Farm loop
@@ -448,6 +468,13 @@ task.spawn(function()
       elseif not fVal("AutoBuy") and abRun then
         abRun = false
         if abTh then task.cancel(abTh); abTh = nil end
+      end
+      if fVal("AutoSell") and not asRun then
+        asRun = true
+        asTh = task.spawn(autoSellLoop)
+      elseif not fVal("AutoSell") and asRun then
+        asRun = false
+        if asTh then task.cancel(asTh); asTh = nil end
       end
       if autoPet and not ptRun then
         scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
@@ -529,7 +556,7 @@ local function Render()
     local hrp = getHRP()
     local yS = hrp and tostring(math.floor(hrp.Position.Y)) or "?"
     local pi = (phase == "Night") and "~" or (phase == "Day") and "#" or "?"
-    STX.Text = "Y " .. yS .. "  |  L " .. lootCount .. "  S " .. stolenCount .. "  B " .. (abRun and "ON" or "OFF") .. "  " .. pi
+    STX.Text = "Y " .. yS .. "  |  L " .. lootCount .. "  S " .. stolenCount .. "  B " .. (abRun and "ON" or "OFF") .. "  Se " .. (asRun and "ON" or "OFF") .. "  " .. pi
     STX.Position = Vector2.new(x0 + 14, y0 + uiS.Y - STH - 4)
     SCR_U.Visible = false; SCR_D.Visible = false
   else
@@ -688,6 +715,8 @@ _G.MatchaCleanup = function()
   ScriptActive = false
   abRun = false
   if abTh then task.cancel(abTh); abTh = nil end
+  asRun = false
+  if asTh then task.cancel(asTh); asTh = nil end
   ptRun = false
   if ptTh then task.cancel(ptTh); ptTh = nil end
   pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
@@ -696,4 +725,4 @@ _G.MatchaCleanup = function()
 end
 
 safeNotify("Farm loaded!", "Garden 2", 3)
-print("[Farm] HARVEST + BUY + LOOT + PET ready")
+print("[Farm] HARVEST + BUY + SELL + LOOT + PET ready")
