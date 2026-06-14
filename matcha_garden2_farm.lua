@@ -89,7 +89,7 @@ end
 feat("AutoHarvest", "AUTO HARVEST",     "toggle")
 feat("AutoBuy",     "AUTO BUY",         "toggle")
 feat("AutoLoot",    "AUTO LOOT",        "toggle")
-feat("AutoSell",     "AUTO SELL (SOON)",  "toggle")
+feat("AutoSell",     "AUTO SELL",  "toggle")
 feat("ForceBuy",    "BUY",              "action")
 
 local function fVal(key)
