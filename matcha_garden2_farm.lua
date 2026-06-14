@@ -13,31 +13,18 @@ local Drawing  = Drawing
 
 local players   = game:GetService("Players")
 local workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RS = game:GetService("ReplicatedStorage")
 local player    = players.LocalPlayer
 
 
 
 -- Auto-restart support - find script source
-local RESTART_SOURCE = nil
-local RESTART_PATHS = {
-  "C:\\Users\\Administrator\\Desktop\\PROYECTOMATCHA\\matcha_garden2_farm.lua",
-  "C:/Users/Administrator/Desktop/PROYECTOMATCHA/matcha_garden2_farm.lua",
-  "matcha_garden2_farm.lua",
-}
-for _, p in ipairs(RESTART_PATHS) do
-  local ok, src = pcall(readfile, p)
-  if ok and src and type(src) == "string" and #src > 100 then
-    RESTART_SOURCE = src
-    break
-  end
-end
-if not RESTART_SOURCE then
-  print("[Farm] WARNING: auto-restart unavailable (can't read source)")
-end
+local RSRC
+local RPA = {"matcha_garden2_farm.lua","C:\\Users\\Administrator\\Desktop\\PROYECTOMATCHA\\matcha_garden2_farm.lua","C:/Users/Administrator/Desktop/PROYECTOMATCHA/matcha_garden2_farm.lua"}
+for _, p in ipairs(RPA) do local ok, s = pcall(readfile, p); if ok and s and #s > 100 then RSRC = s; break end end
+if not RSRC then print("[Farm] WARNING: auto-restart unavailable") end
 
-local harvestCycles = 0
-local MAX_CYCLES = 2
+local hCyc = 0; local MCYC = 2
 
 local function safeNotify(msg, title, dur)
   pcall(function() notify(tostring(msg), tostring(title or "Farm"), dur or 3) end)
@@ -58,51 +45,39 @@ local function D(typ, props)
 end
 
 -- UI colors
-local C_ACCENT = Color3.fromRGB(0, 212, 170)
-local C_ACCENT2 = Color3.fromRGB(0, 180, 140)
-local C_BG = Color3.fromRGB(14, 14, 22)
-local C_TOP = Color3.fromRGB(24, 24, 38)
-local C_TEXT = Color3.fromRGB(225, 225, 235)
-local C_DIM = Color3.fromRGB(100, 100, 115)
-local C_TOFF = Color3.fromRGB(55, 55, 72)
-local C_ACTN = Color3.fromRGB(255, 186, 76)
-local C_SOON = Color3.fromRGB(110, 110, 126)
-local C_HOV = Color3.fromRGB(28, 28, 44)
-local C_SEP = Color3.fromRGB(30, 30, 48)
-local C_SHD = Color3.fromRGB(0, 0, 0)
+local C0 = Color3.fromRGB
+local C_A = C0(0, 212, 170); local C_BG = C0(14, 14, 22); local C_TP = C0(24, 24, 38)
+local C_TX = C0(225, 225, 235); local C_DM = C0(100, 100, 115); local C_TO = C0(55, 55, 72)
+local C_AC = C0(255, 186, 76); local C_SN = C0(110, 110, 126); local C_SP = C0(30, 30, 48)
 
-local uiPos   = Vector2.new(150, 120)
-local ROW_H = 28
-local TOP_H = 32
-local ACC_H = 2
-local SEP_H = 1
-local STAT_H = 14
-local MAXS = 5
-local uiSize  = Vector2.new(340, TOP_H + ACC_H + MAXS * ROW_H + 6 + SEP_H + 8 + STAT_H + 6)
-local dragging = false
-local dragOff = Vector2.new(0, 0)
-local lastM1  = false
-local hoverSlot = 0
-local animVal = {}
-
-local Shadow   = D("Square", {Size = Vector2.new(uiSize.X + 8, uiSize.Y + 8), Color = C_SHD, Transparency = 0.4, Filled = true, Visible = true})
-local MainBG   = D("Square", {Size = uiSize, Color = C_BG, Filled = true, Visible = true})
-local BorderL  = D("Square", {Size = Vector2.new(1, uiSize.Y), Color = C_SEP, Filled = true, Visible = true})
-local BorderR  = D("Square", {Size = Vector2.new(1, uiSize.Y), Color = C_SEP, Filled = true, Visible = true})
-local TopBar   = D("Square", {Size = Vector2.new(uiSize.X, TOP_H), Color = C_TOP, Filled = true, Visible = true})
-local AccLine  = D("Square", {Size = Vector2.new(uiSize.X, ACC_H), Color = C_ACCENT, Filled = true, Visible = true})
-local TitleTxt = D("Text",   {Text = "FARM HUB v2", Size = 14, Color = C_ACCENT, Outline = true, Visible = true, Font = Drawing.Fonts.System})
-local SubTxt   = D("Text",   {Text = "grow a garden 2", Size = 9, Color = C_DIM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
-
-local SLabel, SCheck, SFill = {}, {}, {}
-for i = 1, MAXS do
-  SLabel[i] = D("Text",   {Text = "", Size = 13, Color = C_TEXT, Outline = true, Visible = false, Font = Drawing.Fonts.System})
-  SCheck[i] = D("Circle", {Radius = 8, Thickness = 2, Color = C_TOFF, Filled = false, Visible = false})
-  SFill[i]  = D("Circle", {Radius = 5, Color = C_ACCENT, Filled = true, Visible = false})
-  animVal[i] = 0
+local function lerpColor(a, b, t)
+  return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
 end
-local SepLine  = D("Square", {Size = Vector2.new(uiSize.X - 24, SEP_H), Color = C_SEP, Filled = true, Visible = true})
-local StatusTxt = D("Text", {Text = "", Size = 11, Color = C_DIM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+
+local uiPos = Vector2.new(150, 120)
+local RH = 28; local TH = 32; local AH = 2; local SH = 1; local STH = 14; local MAXS = 5
+local uiS = Vector2.new(340, TH + AH + MAXS * RH + 6 + SH + 8 + STH + 6)
+local drg, dOff, lastM1, hov, anm = false, Vector2.new(0, 0), false, 0, {}
+
+local SHD = D("Square", {Size = Vector2.new(uiS.X + 8, uiS.Y + 8), Color = C0(0,0,0), Transparency = 0.4, Filled = true, Visible = true})
+local BG  = D("Square", {Size = uiS, Color = C_BG, Filled = true, Visible = true})
+local TB  = D("Square", {Size = Vector2.new(uiS.X, TH), Color = C_TP, Filled = true, Visible = true})
+local AL  = D("Square", {Size = Vector2.new(uiS.X, AH), Color = C_A, Filled = true, Visible = true})
+local TT  = D("Text",   {Text = "FARM HUB v2", Size = 14, Color = C_A, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local TAB_F = D("Text", {Text = "FARM", Size = 12, Color = C_A, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local TAB_P = D("Text", {Text = "PETS", Size = 12, Color = C_DM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local SCR_U = D("Text", {Text = "▲", Size = 12, Color = C_A, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+local SCR_D = D("Text", {Text = "▼", Size = 12, Color = C_A, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+
+local SL, SC, SF = {}, {}, {}
+for i = 1, MAXS do
+  SL[i] = D("Text",   {Text = "", Size = 13, Color = C_TX, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+  SC[i] = D("Circle", {Radius = 8, Thickness = 2, Color = C_TO, Filled = false, Visible = false})
+  SF[i] = D("Circle", {Radius = 5, Color = C_A, Filled = true, Visible = false})
+  anm[i] = 0
+end
+local SEP = D("Square", {Size = Vector2.new(uiS.X - 24, SH), Color = C_SP, Filled = true, Visible = true})
+local STX = D("Text", {Text = "", Size = 11, Color = C_DM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
 
 local F = {}
 local function feat(key, label, kind)
@@ -132,57 +107,19 @@ local function findPlot()
   end
 end
 
-local function tp(cf)
-  local hrp = getHRP()
-  if hrp then hrp.CFrame = cf end
-end
-
-local function tryCollect(hp)
-  local hrp = getHRP()
-  if not hrp then return end
-  local ok, cf = pcall(function() return hp.CFrame end)
-  if not ok or not cf then return end
-  hrp.CFrame = cf * CFrame.new(0, 0.3, 0)
-  keypress(VK_E); keyrelease(VK_E)
-end
-
-local function getSellButton()
-  local pg = player:FindFirstChild("PlayerGui")
-  if not pg then return nil end
-  local tb = pg:FindFirstChild("TeleportButtons")
-  if not tb then return nil end
-  local inner = tb:FindFirstChild("TeleportButtons")
-  if not inner then return nil end
-  return inner:FindFirstChild("SellButton")
-end
-
-local function clickButton(btn, offX, offY)
-  if not btn then return end
-  local pos = btn.AbsolutePosition
-  local size = btn.AbsoluteSize
-  if not pos or not size then return end
-  mousemoveabs(pos.X + size.X / 2 + (offX or 0), pos.Y + size.Y / 2 + (offY or 0))
-  task.wait(0.15)
-  mouse1click()
-  task.wait(0.3)
-end
+local function tp(cf) local h = getHRP(); if h then h.CFrame = cf end end
 
 local harvestCache = {}
-
-local function scanHarvestCache(plot)
+local function scanHarvest(plot)
   harvestCache = {}
   local plants = plot and plot:FindFirstChild("Plants")
   if not plants then return end
-  for _, plant in ipairs(plants:GetChildren()) do
-    local fruits = plant:FindFirstChild("Fruits")
-    if fruits then
-      for _, fruit in ipairs(fruits:GetChildren()) do
-        local base = fruit:FindFirstChild("Base")
-        if base and base:IsA("BasePart") then
-          table.insert(harvestCache, base)
-        end
-      end
-    end
+  for _, pl in ipairs(plants:GetChildren()) do
+    local fs = pl:FindFirstChild("Fruits")
+    if fs then for _, f in ipairs(fs:GetChildren()) do
+      local b = f:FindFirstChild("Base")
+      if b and b:IsA("BasePart") then table.insert(harvestCache, b) end
+    end end
   end
 end
 
@@ -194,78 +131,16 @@ local function doHarvest()
     if hp and hp.Parent then
       local ok, cf = pcall(function() return hp.CFrame end)
       if ok and cf then
-        local targetPos = cf * CFrame.new(0, 1, 0)
-        local startCF = hrp.CFrame
+        local tp = cf * CFrame.new(0, 1, 0)
+        local sc = hrp.CFrame
         for t = 0, 1, 0.1 do
           if not fVal("AutoHarvest") then break end
-          hrp.CFrame = startCF:Lerp(targetPos, t)
-          task.wait()
+          hrp.CFrame = sc:Lerp(tp, t); task.wait()
         end
-        hrp.CFrame = targetPos
-        keypress(VK_E)
-        task.wait()
-        keyrelease(VK_E)
+        hrp.CFrame = tp; keypress(VK_E); task.wait(); keyrelease(VK_E)
       end
     end
   end
-end
-
-local function doSell()
-  -- 1. Click SellButton → teleport to sell area
-  local sb = getSellButton()
-  if not sb then return end
-  local pos = sb.AbsolutePosition
-  local size = sb.AbsoluteSize
-  if not pos or not size then return end
-  local cx = pos.X + size.X / 2
-  local cy = pos.Y + size.Y / 2
-  task.wait(0.05)
-  mousemoveabs(cx, cy)
-  mousemoveabs(cx, cy + 12)
-  task.wait(0.05)
-  mouse1click(); mouse1click(); mouse1click()
-  task.wait(2)
-
-  -- 2. Press E to interact with NPC
-  keypress(VK_E)
-  task.wait(0.15)
-  keyrelease(VK_E)
-  task.wait(1)
-
-  -- 3. Find Billboard_UI > Objects > Option_UI > Frame > Frame > TextLabel with "Sell Inventory!"
-  local function findAndClickSellOption()
-    local billboardUI = player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Billboard_UI")
-    if not billboardUI then return false end
-    local objects = billboardUI:FindFirstChild("Objects")
-    if not objects then return false end
-    for _, option in ipairs(objects:GetChildren()) do
-      if option:IsA("GuiObject") and (option.Name == "Option_UI" or option.Name:find("Option")) then
-        local f1 = option:FindFirstChild("Frame")
-        local f2 = f1 and f1:FindFirstChild("Frame")
-        local label = f2 and f2:FindFirstChild("TextLabel")
-        if label and label:IsA("TextLabel") then
-          local txt = (label.Text or "")
-          if txt:find("#1") then
-            local p = label.AbsolutePosition
-            local s = label.AbsoluteSize
-            if p and s and s.X > 0 then
-              mousemoveabs(p.X + s.X/2, p.Y + s.Y/2)
-              task.wait(0.15)
-              mouse1click()
-              return true
-            end
-          end
-        end
-      end
-    end
-    return false
-  end
-  if not findAndClickSellOption() then
-    print("[Farm] Billboard_UI/Option with 'Sell Inventory' not found")
-  end
-
-  -- 4. Wait for NPC to finish and give money
-  task.wait(2)
 end
 
 local lootCount = 0
@@ -294,97 +169,81 @@ local function doLoot()
   end
 end
 
--- Auto Steal
-local stolenCount = 0
-local currentPhase = "?"
+local phase = "?"; local stolenCount = 0
+local function getPhase() local v = workspace:GetAttribute("ActivePhase"); if v then phase = tostring(v) end return phase end
 
-local function getPhase()
-  local val = workspace:GetAttribute("ActivePhase")
-  if val and val ~= "?" then currentPhase = tostring(val) end
-  return currentPhase
-end
-
-local stealCache = {}
-local function isOwnerNear(p)
-  local pSp = p:FindFirstChild("SpawnPoint")
-  if not pSp then return true end
-  local ok, pPos = pcall(function() return pSp.Position end)
-  if not ok then return true end
-  for _, pl in ipairs(players:GetPlayers()) do
-    if pl ~= player then
-      local char = pl.Character
-      if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-          local ok2, dist = pcall(function() return (hrp.Position - pPos).Magnitude end)
-          if ok2 and dist < 25 then return true end
-        end
+-- Pets
+local activeTab = "farm"
+local ALL_PETS = {"Frog","Bunny","Owl","Deer","Robin","Bee","Monkey","GoldenDragonfly","Unicorn","Raccoon","IceSerpent","BlackDragon","Golden Dragonfly","Ice Serpent","Black Dragon"}
+local petSpawned = {}; local petSelected = {}; local petScroll = 0
+local ptRun = false; local ptTh = nil; local ptCount = 0; local autoPet = false
+local function petCount() local c=0; for _,v in pairs(petSelected) do if v then c=c+1 end end return c end
+local function scanPets()
+  local sp = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("WildPetSpawns")
+  for _, nm in ipairs(ALL_PETS) do petSpawned[nm] = nil end
+  if not sp then return end
+  for _, inst in ipairs(sp:GetChildren()) do
+    local n = inst.Name
+    for _, nm in ipairs(ALL_PETS) do
+      local p = nm:gsub("%s+", "")
+      local q = nm:gsub("%s+", "_")
+      if n:find("WildPet_" .. p .. "_") or n:find("WildPet_" .. q .. "_") or n:find(p) or n:find(q) then
+        petSpawned[nm] = inst
+        if petSelected[nm] == nil then petSelected[nm] = true end
+        break
       end
     end
   end
-  return false
-end
-
-local function scanStealCache()
-  stealCache = {}
-  if not gardens then return end
-  local myPlot = findPlot()
-  if not myPlot then return end
-  local sp = myPlot:FindFirstChild("SpawnPoint")
-  local spawnCF = sp and pcall(function() return sp.CFrame end) and sp.CFrame or nil
-  for _, p in ipairs(gardens:GetChildren()) do
-    if p ~= myPlot and not isOwnerNear(p) then
-      local plants = p:FindFirstChild("Plants")
-      if plants then
-        for _, plant in ipairs(plants:GetChildren()) do
-          local fruits = plant:FindFirstChild("Fruits")
-          if fruits then
-            for _, fruit in ipairs(fruits:GetChildren()) do
-              local base = fruit:FindFirstChild("Base")
-              if base and base:IsA("BasePart") then
-                table.insert(stealCache, {part = base, spawn = spawnCF})
-              end
-            end
-          end
+  for _, inst in ipairs(sp:GetChildren()) do
+    if inst.ClassName ~= "Model" then
+      local n = inst.Name
+      for _, nm in ipairs(ALL_PETS) do
+        if n == nm or n == nm:gsub("%s+", "") then
+          petSpawned[nm] = inst
+          break
         end
       end
     end
   end
 end
-
-local function doSteal()
-  scanStealCache()
-  if #stealCache == 0 then print("[Steal] 0 fruits on other plots"); return end
-  print("[Steal] " .. #stealCache .. " fruits found on other plots")
-  local hrp = getHRP()
-  if not hrp then return end
-  for i, target in ipairs(stealCache) do
-    if not fVal("AutoSteal") then break end
-    local ok, cf = pcall(function() return target.part.CFrame end)
-    if ok and cf then
-      local targetPos = cf * CFrame.new(0, 1, 0)
-      local startCF = hrp.CFrame
-      for t = 0, 1, 0.1 do
-        if not fVal("AutoSteal") then break end
-        hrp.CFrame = startCF:Lerp(targetPos, t)
-        task.wait()
-      end
-      hrp.CFrame = targetPos
-      keypress(VK_E)
-      task.wait()
-      keyrelease(VK_E)
-      stolenCount = stolenCount + 1
-      if i % 2 == 0 and target.spawn then
-        hrp.CFrame = target.spawn * CFrame.new(0, 3, 0)
-      end
-    end
+local function getPetPart(petInst)
+  if petInst.ClassName ~= "Model" then return petInst end
+  local pp = petInst.PrimaryPart; if pp then return pp end
+  local pa = petInst:FindFirstChild("PromptAnchor"); if pa then return pa end
+  for _, c in ipairs(petInst:GetChildren()) do
+    if c.ClassName ~= "Model" then return c end
   end
-  print("[Steal] +" .. #stealCache .. " (total " .. stolenCount .. ")")
+  return nil
+end
+local function doPetBuy(name)
+  local inst = petSpawned[name]
+  if not inst then return end
+  local hrp = getHRP(); if not hrp then return end
+  local part = getPetPart(inst)
+  if not part then return end
+  local ok, cf = pcall(function() return part.CFrame end)
+  if not ok or not cf then return end
+  hrp.CFrame = cf * CFrame.new(0, 1, 0); task.wait(0.15)
+  keypress(VK_E); task.wait(1.2); keyrelease(VK_E)
+  ptCount = ptCount + 1; print("[PET] bought " .. name)
+end
+local function petBuyLoop()
+  safeNotify("AutoPet started!", "AutoPet", 3)
+  while ptRun do
+    scanPets()
+    for _, nm in ipairs(ALL_PETS) do
+      if not ptRun then break end
+      if petSelected[nm] and petSpawned[nm] then doPetBuy(nm) end
+    end
+    task.wait(5)
+  end
+  ptRun = false; ptTh = nil
+  safeNotify("AutoPet stopped!", "AutoPet", 3)
 end
 
 -- Auto Buy
-local autoBuyRunning = false
-local autoBuyThread = nil
+local abRun = false
+local abTh = nil
 
 local function num(t)
   if not t or type(t) ~= "string" then return 0 end
@@ -412,8 +271,9 @@ end
 local function gClk(o)
   if not o then return end
   local p, s = o.AbsolutePosition, o.AbsoluteSize
+  if s.X <= 0 or s.Y <= 0 then return end
   mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
-  task.wait(0.05); mouse1click()
+  task.wait(0.02); mouse1click(); task.wait(0.02)
 end
 
 local function rScrl(sh)
@@ -428,11 +288,20 @@ local function rScrl(sh)
   end
 end
 
-local function sclv(sh, it)
-  pcall(function()
-    local y = sh.CanvasPosition.Y + (it.AbsolutePosition.Y - sh.AbsolutePosition.Y)
-    sh.CanvasPosition = Vector2.new(0, math.max(0, y))
+local function sclv(sh, it, idx)
+  if not sh then return end
+  local ok = pcall(function()
+    local ry = sh.CanvasPosition.Y + (it.AbsolutePosition.Y - sh.AbsolutePosition.Y)
+    sh.CanvasPosition = Vector2.new(0, math.max(0, ry))
   end)
+  if not ok then
+    local p, s = sh.AbsolutePosition, sh.AbsoluteSize
+    if s.X > 0 and s.Y > 0 then
+      mousemoveabs(p.X + s.X / 2, p.Y + s.Y / 2)
+      task.wait(0.05)
+      mousescroll(10); task.wait(0.05)
+    end
+  end
   task.wait(0.15)
 end
 
@@ -443,47 +312,51 @@ local function ferm(fr)
 end
 
 local function attRst()
-  local ok, v = pcall(function() return ReplicatedStorage.StockValues.SeedShop.UnixNextRestock end)
+  local ok, v = pcall(function() return RS.StockValues.SeedShop.UnixNextRestock end)
   if not ok or not v then
-    local t = 0; while t < 300 and autoBuyRunning do task.wait(1); t = t + 1 end
+    local t = 0; while t < 300 and abRun do task.wait(1); t = t + 1 end
     return
   end
   local nxt = v.Value
   local rst = nxt - os.time()
   if rst > 0 then
     safeNotify("Restock in " .. math.floor(rst / 60) .. "m " .. rst % 60 .. "s", "AutoBuy", 5)
-    local t = 0; while t < rst + 2 and autoBuyRunning do task.wait(1); t = t + 1 end
+    local t = 0; while t < rst + 2 and abRun do task.wait(1); t = t + 1 end
   end
-  while v.Value == nxt and autoBuyRunning do task.wait(0.5) end
-  if autoBuyRunning then safeNotify("Restock! Restarting...", "AutoBuy", 3); task.wait(2) end
+  while v.Value == nxt and abRun do task.wait(0.5) end
+  if abRun then safeNotify("Restock! Restarting...", "AutoBuy", 3); task.wait(2) end
 end
 
 local function achtt(fr)
   local tot = 0
   for _, nm in pairs({"NormalShop", "ExclusiveShop"}) do
-    if not autoBuyRunning then return tot end
-    local sh = fr:FindFirstChild(nm)
-    if not sh then continue end
-    local ok, bb = pcall(function() return sh.Sheckles_Shelf.Main_Frame.Buttons.BuyButton end)
+    if not abRun then return tot end
+    local sh0 = fr:FindFirstChild(nm)
+    if not sh0 then continue end
+    local ok, bb = pcall(function() return sh0.Sheckles_Shelf.Main_Frame.Buttons.BuyButton end)
     if not ok or not bb then continue end
-    task.wait(0.3); rScrl(sh)
-    for _, it in pairs(sh:GetChildren()) do
-      if not autoBuyRunning then ferm(fr); return tot end
+    rScrl(sh0); task.wait(0.2)
+    local kids = sh0:GetChildren()
+    for idx, it in ipairs(kids) do
+      if not abRun then ferm(fr); return tot end
       if it.Name == "Sheckles_Shelf" or it.Name == "Robux_Shelf" or it.Name == "ItemTemplate" then continue end
+      local sh = fr:FindFirstChild(nm) or sh0
       local mf = it:FindFirstChild("Main_Frame")
       if not mf then continue end
       local sb = mf:FindFirstChild("TextButton")
       if not sb then continue end
-      sclv(sh, it); gClk(sb); task.wait(0.1)
-      if not autoBuyRunning then ferm(fr); return tot end
+      sclv(sh, it, idx); gClk(sb); task.wait(0.5)
+      if not abRun then ferm(fr); return tot end
       local px, sk = prix(mf), stk(mf)
-      if px <= 0 or sk <= 0 then continue end
+      print("[AB] "..it.Name.." #"..idx.." px="..px.." sk="..sk)
+      if px <= 0 or sk <= 0 then task.wait(0.2); continue end
       if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
       for _ = 1, sk do
-        if not autoBuyRunning then ferm(fr); return tot end
+        if not abRun then ferm(fr); return tot end
         if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
-        gClk(bb); tot = tot + 1; task.wait(0.03)
+        gClk(bb); tot = tot + 1; print("[AB] bought "..it.Name.." #"..tot); task.wait(0.15)
       end
+      task.wait(0.2)
     end
   end
   ferm(fr); safeNotify("Cycle done! " .. tot .. " seeds bought.", "AutoBuy", 5)
@@ -499,10 +372,10 @@ local function ouvr()
   hrp.CFrame = CFrame.new(sp.X, sp.Y + 1, sp.Z + 3)
   local fr, att = nil, 0
   repeat
-    if not autoBuyRunning then return nil end
+    if not abRun then return nil end
     att = att + 1
-    for _ = 1, 3 do keypress(VK_E); keyrelease(VK_E) end
-    task.wait(0.3)
+    keypress(VK_E); keyrelease(VK_E)
+    task.wait(0.6)
     local sg = player.PlayerGui:FindFirstChild("SeedShop")
     if sg then fr = sg:FindFirstChild("Frame") end
     if not fr then
@@ -515,14 +388,14 @@ end
 
 local function autoBuyLoop()
   safeNotify("AutoBuy started!", "AutoBuy", 3)
-  while autoBuyRunning do
+  while abRun do
     local fr = ouvr()
-    if not autoBuyRunning then break end
-    if fr then achtt(fr); if not autoBuyRunning then break end; attRst()
+    if not abRun then break end
+    if fr then achtt(fr); if not abRun then break end; attRst()
     else task.wait(5) end
   end
-  autoBuyRunning = false
-  autoBuyThread = nil
+  abRun = false
+  abTh = nil
   safeNotify("AutoBuy stopped!", "AutoBuy", 3)
 end
 
@@ -536,7 +409,7 @@ task.spawn(function()
   local plot = findPlot()
   if not plot then print("[Farm] No plot found"); return end
   print("[Farm] Plot: " .. plot.Name)
-  scanHarvestCache(plot)
+  scanHarvest(plot)
   print("[Farm] Cached " .. #harvestCache .. " harvest targets")
 
   local prevHarvest = false
@@ -559,25 +432,30 @@ task.spawn(function()
       end
       prevHarvest = harvesting
       if harvesting then
-        scanHarvestCache(plot); doHarvest()
-        harvestCycles = harvestCycles + 1
-        if harvestCycles >= MAX_CYCLES and RESTART_SOURCE then
-          print("[Farm] Auto-restart after " .. harvestCycles .. " cycles")
+        scanHarvest(plot); doHarvest()
+        hCyc = hCyc + 1
+        if hCyc >= MCYC and RSRC then
+          print("[Farm] Auto-restart after " .. hCyc .. " cycles")
           _G.MatchaCleanup()
           task.wait(1)
-          task.spawn(loadstring(RESTART_SOURCE))
+          task.spawn(loadstring(RSRC))
           return
         end
       end
-      if fVal("AutoBuy") and not autoBuyRunning then
-        autoBuyRunning = true
-        autoBuyThread = task.spawn(autoBuyLoop)
-      elseif not fVal("AutoBuy") and autoBuyRunning then
-        autoBuyRunning = false
-        if autoBuyThread then task.cancel(autoBuyThread); autoBuyThread = nil end
+      if fVal("AutoBuy") and not abRun then
+        abRun = true
+        abTh = task.spawn(autoBuyLoop)
+      elseif not fVal("AutoBuy") and abRun then
+        abRun = false
+        if abTh then task.cancel(abTh); abTh = nil end
+      end
+      if autoPet and not ptRun then
+        scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
+      elseif not autoPet and ptRun then
+        ptRun = false; if ptTh then task.cancel(ptTh); ptTh = nil end
       end
       if fVal("AutoLoot") then doLoot() end
-      if fVal("AutoSteal") and getPhase() == "Night" then doSteal() end
+      getPhase()
     end
   end
 end)
@@ -607,138 +485,215 @@ local ActionMap = {
 
 local function Render()
   local x0, y0 = uiPos.X, uiPos.Y
-  Shadow.Position  = Vector2.new(x0 - 4, y0 - 4)
-  MainBG.Position  = Vector2.new(x0, y0)
-  BorderL.Position = Vector2.new(x0 - 1, y0)
-  BorderR.Position = Vector2.new(x0 + uiSize.X, y0)
-  TopBar.Position  = Vector2.new(x0, y0)
-  AccLine.Position = Vector2.new(x0, y0 + TOP_H)
-  TitleTxt.Position = Vector2.new(x0 + 14, y0 + 8)
-  SubTxt.Position   = Vector2.new(x0 + 14, y0 + 22)
+  SHD.Position = Vector2.new(x0 - 4, y0 - 4)
+  BG.Position  = Vector2.new(x0, y0)
+  TB.Position  = Vector2.new(x0, y0)
+  AL.Position  = Vector2.new(x0, y0 + TH)
+  TT.Text = (activeTab == "farm") and "FARM HUB v2" or "PETS HUB v2"
+  TT.Position  = Vector2.new(x0 + 14, y0 + 8)
 
-  local yy0 = y0 + TOP_H + ACC_H + 3
-  for slot = 1, MAXS do
-    local f = F[slot]
-    if not f then
-      SLabel[slot].Visible = false; SCheck[slot].Visible = false; SFill[slot].Visible = false
-      continue
+  TAB_F.Position = Vector2.new(x0 + uiS.X - 72, y0 + 9)
+  TAB_P.Position = Vector2.new(x0 + uiS.X - 40, y0 + 9)
+  TAB_F.Color = (activeTab == "farm") and C_A or C_DM
+  TAB_P.Color = (activeTab == "pets") and C_A or C_DM
+
+  local yy0 = y0 + TH + AH + 3
+  if activeTab == "farm" then
+    for s = 1, MAXS do
+      local f = F[s]
+      if not f then SL[s].Visible = false; SC[s].Visible = false; SF[s].Visible = false; continue end
+      local yy = yy0 + (s - 1) * RH
+      local ih = (hov == s)
+      local lc = C_TX
+      if f.kind == "action" then lc = C_AC elseif f.kind == "soon" then lc = C_SN elseif f.value then lc = C_A end
+      local txt = "   " .. f.label; if f.kind == "action" then txt = ">> " .. f.label end
+      SL[s].Text = txt; SL[s].Position = Vector2.new(x0 + 16, yy)
+      if ih then
+        if f.kind == "action" then SL[s].Color = C0(255, 210, 120)
+        elseif f.value then SL[s].Color = C_A
+        else SL[s].Color = C_TX end
+      else SL[s].Color = lc end
+      SL[s].Visible = true
+      if f.kind == "toggle" then
+        SC[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+        SC[s].Color = f.value and C_A or C_TO; SC[s].Visible = true
+        SF[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+        if f.value then anm[s] = math.min(1, anm[s] + 0.08) else anm[s] = math.max(0, anm[s] - 0.08) end
+        if anm[s] > 0.01 then
+          SF[s].Visible = true; SF[s].Radius = 1 + anm[s] * 4
+          SF[s].Color = lerpColor(C_A, C_TO, 1 - anm[s])
+        else SF[s].Visible = false end
+      else SC[s].Visible = false; SF[s].Visible = false end
     end
-    local yy = yy0 + (slot - 1) * ROW_H
-
-    local isHover = (hoverSlot == slot)
-    local lblColor = C_TEXT
-    if f.kind == "action" then lblColor = C_ACTN
-    elseif f.kind == "soon" then lblColor = C_SOON
-    elseif f.value then lblColor = C_ACCENT
-    end
-
-    local txt = "   " .. f.label
-    if f.kind == "action" then txt = ">> " .. f.label end
-
-    SLabel[slot].Text = txt
-    SLabel[slot].Position = Vector2.new(x0 + 16, yy)
-    if isHover then
-      if f.kind == "action" then SLabel[slot].Color = Color3.fromRGB(255, 210, 120)
-      elseif f.value then SLabel[slot].Color = C_ACCENT2
-      else SLabel[slot].Color = C_TEXT end
-    else
-      SLabel[slot].Color = lblColor
-    end
-    SLabel[slot].Visible = true
-
-    if f.kind == "toggle" then
-      SCheck[slot].Position = Vector2.new(x0 + uiSize.X - 26, yy + 7)
-      SCheck[slot].Color = f.value and C_ACCENT or C_TOFF
-      SCheck[slot].Visible = true
-      SFill[slot].Position = Vector2.new(x0 + uiSize.X - 26, yy + 7)
-      if f.value then
-        animVal[slot] = math.min(1, animVal[slot] + 0.08)
+    SEP.Position = Vector2.new(x0 + 12, y0 + uiS.Y - STH - 10)
+    local hrp = getHRP()
+    local yS = hrp and tostring(math.floor(hrp.Position.Y)) or "?"
+    local pi = (phase == "Night") and "~" or (phase == "Day") and "#" or "?"
+    STX.Text = "Y " .. yS .. "  |  L " .. lootCount .. "  S " .. stolenCount .. "  B " .. (abRun and "ON" or "OFF") .. "  " .. pi
+    STX.Position = Vector2.new(x0 + 14, y0 + uiS.Y - STH - 4)
+    SCR_U.Visible = false; SCR_D.Visible = false
+  else
+    -- pets tab: hide all slots first, then render pets
+    for s = 1, MAXS do SL[s].Visible = false; SC[s].Visible = false; SF[s].Visible = false end
+    for s = 1, MAXS do
+      local yy = yy0 + (s - 1) * RH
+      if s == 1 then
+        local on = autoPet
+        SL[s].Text = "   AUTO PET"; SL[s].Position = Vector2.new(x0 + 16, yy)
+        SL[s].Color = (hov == s) and (on and C_A or C_TX) or (on and C_A or C_DM)
+        SL[s].Visible = true
+        SC[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+        SC[s].Color = on and C_A or C_TO; SC[s].Visible = true
+        SF[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+        if on then anm[s] = math.min(1, anm[s] + 0.08) else anm[s] = math.max(0, anm[s] - 0.08) end
+        if anm[s] > 0.01 then
+          SF[s].Visible = true; SF[s].Radius = 1 + anm[s] * 4
+          SF[s].Color = lerpColor(C_A, C_TO, 1 - anm[s])
+        else SF[s].Visible = false end
       else
-        animVal[slot] = math.max(0, animVal[slot] - 0.08)
+        local pi = petScroll + s - 1
+        local nm = ALL_PETS[pi]
+        if nm then
+          local ok2 = pcall(function()
+            local sel = petSelected[nm]; local spawned = petSpawned[nm] ~= nil
+            local prefix = spawned and "* " or "  "
+            SL[s].Text = prefix .. nm; SL[s].Position = Vector2.new(x0 + 16, yy)
+            if hov == s then
+              SL[s].Color = sel and C_A or C_TX
+            elseif sel then
+              SL[s].Color = spawned and C_A or C_DM
+            else
+              SL[s].Color = spawned and C_TX or C_DM
+            end
+            SL[s].Visible = true
+            SC[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+            SC[s].Color = sel and C_A or C_TO; SC[s].Visible = true
+            SF[s].Position = Vector2.new(x0 + uiS.X - 26, yy + 7)
+            if sel then anm[s] = math.min(1, anm[s] + 0.08) else anm[s] = math.max(0, anm[s] - 0.08) end
+            if anm[s] > 0.01 then
+              SF[s].Visible = true; SF[s].Radius = 1 + anm[s] * 4
+              SF[s].Color = lerpColor(C_A, C_TO, 1 - anm[s])
+            else SF[s].Visible = false end
+          end)
+        end
       end
-      if animVal[slot] > 0.01 then
-        SFill[slot].Visible = true
-        SFill[slot].Radius = 1 + animVal[slot] * 4
-        SFill[slot].Color = C_ACCENT:Lerp(C_TOFF, 1 - animVal[slot])
-      else
-        SFill[slot].Visible = false
-      end
-    else
-      SCheck[slot].Visible = false; SFill[slot].Visible = false
     end
+    SEP.Position = Vector2.new(x0 + 12, y0 + uiS.Y - STH - 10)
+    local spawnedCount = 0; for _, v in pairs(petSpawned) do if v then spawnedCount = spawnedCount + 1 end end
+    STX.Text = "Spawned: " .. spawnedCount .. "  Sel: " .. petCount() .. "  P " .. (ptRun and "ON" or "OFF")
+    STX.Position = Vector2.new(x0 + 14, y0 + uiS.Y - STH - 4)
+    SCR_U.Position = Vector2.new(x0 + uiS.X - 22, y0 + TH + AH + 6)
+    SCR_U.Visible = petScroll > 0
+    SCR_D.Position = Vector2.new(x0 + uiS.X - 22, y0 + uiS.Y - STH - 24)
+    SCR_D.Visible = petScroll + 4 < #ALL_PETS
   end
-
-  SepLine.Position = Vector2.new(x0 + 12, y0 + uiSize.Y - STAT_H - 10)
-  local hrp = getHRP()
-  local yStr = hrp and tostring(math.floor(hrp.Position.Y)) or "?"
-  local phaseIcon = (currentPhase == "Night") and "~" or (currentPhase == "Day") and "#" or "?"
-  StatusTxt.Text = "Y " .. yStr .. "  |  L " .. lootCount .. "  S " .. stolenCount .. "  B " .. (autoBuyRunning and "ON" or "OFF") .. "  " .. phaseIcon
-  StatusTxt.Position = Vector2.new(x0 + 14, y0 + uiSize.Y - STAT_H - 4)
 end
 
 task.spawn(function()
   print("[UI] Input loop ready")
   while ScriptActive do
     task.wait(0.016)
-    local mx, my = 0, 0
-    pcall(function() local m = player:GetMouse(); mx = m.X; my = m.Y end)
-    local m1 = false
-    pcall(function() m1 = ismouse1pressed() end)
+    local mx, my = 0, 0; pcall(function() local m = player:GetMouse(); mx = m.X; my = m.Y end)
+    local m1 = false; pcall(function() m1 = ismouse1pressed() end)
+    local yy0 = uiPos.Y + TH + AH + 3; hov = 0
 
-    local yy0 = uiPos.Y + TOP_H + ACC_H + 3
-    hoverSlot = 0
-    for slot = 1, MAXS do
-      local yy = yy0 + (slot - 1) * ROW_H
-      if mx >= uiPos.X + 8 and mx <= uiPos.X + uiSize.X - 8 and my >= yy - 4 and my <= yy + ROW_H then
-        hoverSlot = slot
-        break
+    if activeTab == "farm" then
+      for s = 1, MAXS do
+        local yy = yy0 + (s - 1) * RH
+        if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then hov = s; break end
       end
-    end
-
-    if m1 and not lastM1 then
-      for slot = 1, MAXS do
-        local f = F[slot]
-        local yy = yy0 + (slot - 1) * ROW_H
-        if mx >= uiPos.X + 8 and mx <= uiPos.X + uiSize.X - 8 and my >= yy - 4 and my <= yy + ROW_H then
-          if f.kind == "toggle" then
-            f.value = not f.value
-            local extra = ""
-            if f.key == "AutoSteal" and f.value then extra = " [" .. getPhase() .. "]" end
-            print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value) .. extra)
-            safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF") .. extra, "Toggle", 2)
-          elseif f.kind == "soon" then
-            safeNotify("Coming soon!", "WIP", 2)
-          elseif f.kind == "action" then
-            print("[UI] ACTION: " .. f.key)
-            local handler = ActionMap[f.key]
-            if handler then task.spawn(handler) end
+      if m1 and not lastM1 then
+        for s = 1, MAXS do
+          local f = F[s]; local yy = yy0 + (s - 1) * RH
+          if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then
+            if f.kind == "toggle" then
+              f.value = not f.value
+              print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value))
+              safeNotify(f.label .. ": " .. (f.value and "ON" or "OFF"), "Toggle", 2)
+            elseif f.kind == "soon" then safeNotify("Coming soon!", "WIP", 2)
+            elseif f.kind == "action" then
+              print("[UI] ACTION: " .. f.key)
+              local h = ActionMap[f.key]; if h then task.spawn(h) end
+            end
           end
         end
       end
-      if mx >= uiPos.X and mx <= uiPos.X + uiSize.X and my >= uiPos.Y and my <= uiPos.Y + TOP_H then
-        dragging = true
-        dragOff = Vector2.new(mx - uiPos.X, my - uiPos.Y)
+    else
+      for s = 1, MAXS do
+        local yy = yy0 + (s - 1) * RH
+        if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then hov = s; break end
+      end
+      if m1 and not lastM1 then
+        for s = 1, MAXS do
+          local yy = yy0 + (s - 1) * RH
+          if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then
+            if s == 1 then
+              autoPet = not autoPet
+              print("[UI] TOGGLED: AutoPet = " .. tostring(autoPet))
+              safeNotify("AutoPet: " .. (autoPet and "ON" or "OFF"), "Toggle", 2)
+              if autoPet and not ptRun then
+                scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
+              elseif not autoPet and ptRun then
+                ptRun = false; if ptTh then task.cancel(ptTh); ptTh = nil end
+              end
+            else
+              local pi = petScroll + s - 1
+              local nm = ALL_PETS[pi]
+              if nm then
+                petSelected[nm] = not petSelected[nm]
+                print("[UI] Pet " .. nm .. " = " .. tostring(petSelected[nm]))
+              end
+            end
+          end
+        end
+        -- arrow clicks
+        if mx >= uiPos.X + uiS.X - 30 and mx <= uiPos.X + uiS.X - 10 and my >= uiPos.Y + TH + AH + 3 and my <= uiPos.Y + TH + AH + 20 then
+          if petScroll > 0 then petScroll = petScroll - 1 end
+        end
+        if mx >= uiPos.X + uiS.X - 30 and mx <= uiPos.X + uiS.X - 10 and my >= uiPos.Y + uiS.Y - STH - 30 and my <= uiPos.Y + uiS.Y - STH - 15 then
+          if petScroll + 4 < #ALL_PETS then petScroll = petScroll + 1 end
+        end
       end
     end
 
-    if dragging then
-      if m1 then uiPos = Vector2.new(mx - dragOff.X, my - dragOff.Y)
-      else dragging = false end
+    -- tab switch click
+    if m1 and not lastM1 then
+      local tx = uiPos.X + uiS.X - 72; local ty = uiPos.Y + 9; local tabHit = false
+      if mx >= tx and mx <= tx + 30 and my >= ty - 4 and my <= ty + 14 then activeTab = "farm"; petScroll = 0; scanPets(); tabHit = true end
+      tx = uiPos.X + uiS.X - 40
+      if mx >= tx and mx <= tx + 30 and my >= ty - 4 and my <= ty + 14 then activeTab = "pets"; petScroll = 0; scanPets(); tabHit = true end
+
+      if not tabHit and mx >= uiPos.X and mx <= uiPos.X + uiS.X and my >= uiPos.Y and my <= uiPos.Y + TH then
+        drg = true; dOff = Vector2.new(mx - uiPos.X, my - uiPos.Y)
+      end
     end
 
-    lastM1 = m1
-    pcall(Render)
+    -- pet scroll via arrow keys
+    pcall(function()
+      if activeTab == "pets" and iskeypressed(0x28) then
+        if petScroll + 4 < #ALL_PETS then petScroll = petScroll + 1; task.wait(0.12) end
+      elseif activeTab == "pets" and iskeypressed(0x26) then
+        if petScroll > 0 then petScroll = petScroll - 1; task.wait(0.12) end
+      end
+    end)
+
+    if drg then
+      if m1 then uiPos = Vector2.new(mx - dOff.X, my - dOff.Y) else drg = false end
+    end
+    lastM1 = m1; local rok, rerr = pcall(Render); if not rok then print("[UI] Render error:", tostring(rerr)) end
   end
 end)
 
 _G.MatchaCleanup = function()
   ScriptActive = false
-  autoBuyRunning = false
-  if autoBuyThread then task.cancel(autoBuyThread); autoBuyThread = nil end
+  abRun = false
+  if abTh then task.cancel(abTh); abTh = nil end
+  ptRun = false
+  if ptTh then task.cancel(ptTh); ptTh = nil end
   pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
   for _, obj in ipairs(drawObjs) do pcall(function() obj:Remove() end) end
   print("[Farm] Cleanup done")
 end
 
-safeNotify("Farm Hub loaded!", "Garden 2", 3)
-print("[Farm] AUTO HARVEST + AUTO BUY + AUTO LOOT + AUTO STEAL ready")
+safeNotify("Farm loaded!", "Garden 2", 3)
+print("[Farm] HARVEST + BUY + LOOT + PET ready")
