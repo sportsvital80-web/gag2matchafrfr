@@ -168,11 +168,12 @@ local function doHarvest()
       if ok and cf then
         local standPos = cf * CFrame.new(0, 0.5, -2)
         hrp.CFrame = standPos
+        task.wait(0.15)
         keypress(VK_E)
-        for _ = 1, 8 do
+        for _ = 1, 6 do
           if not fVal("AutoHarvest") then break end
           hrp.CFrame = standPos
-          task.wait(0.01)
+          task.wait(0.03)
         end
         keyrelease(VK_E)
       end
@@ -275,52 +276,15 @@ local function getPhase()
 end
 
 local stealCache = {}
-local function getPlotOwner(plot)
-  local attrs = plot:GetAttributes()
-  if attrs then return attrs["Owner"] end
-  return nil
-end
-
-local function isPlayerInsidePlot(plr, plot)
-  local char = plr.Character
-  if not char then return false end
-  local hrp = char:FindFirstChild("HumanoidRootPart")
-  if not hrp then return false end
-  local visual = plot:FindFirstChild("Visual")
-  if not visual then return false end
-  local sizeRef = visual:FindFirstChild("PlotSizeReference")
-  if not sizeRef or not sizeRef:IsA("BasePart") then return false end
-  local okPos, pos = pcall(function() return sizeRef.Position end)
-  local okSz, sz = pcall(function() return sizeRef.Size end)
-  if not okPos or not okSz then return false end
-  local plrPos = hrp.Position
-  local dx = math.abs(plrPos.X - pos.X)
-  local dy = math.abs(plrPos.Y - pos.Y)
-  local dz = math.abs(plrPos.Z - pos.Z)
-  return dx <= sz.X/2 and dy <= sz.Y/2 and dz <= sz.Z/2
-end
-
-local function isOwnerOutside(plot)
-  local owner = getPlotOwner(plot)
-  if not owner then return true end
-  local plr = players:FindFirstChild(owner)
-  if not plr then print("[Steal] " .. owner .. " offline"); return true end
-  local inside = isPlayerInsidePlot(plr, plot)
-  if inside then return false end
-  print("[Steal] " .. owner .. " outside plot")
-  return true
-end
-
 local function scanStealCache()
   stealCache = {}
   if not gardens then return end
   local myPlot = findPlot()
   if not myPlot then return end
-  local myOwner = getPlotOwner(myPlot)
   local sp = myPlot:FindFirstChild("SpawnPoint")
   local spawnCF = sp and pcall(function() return sp.CFrame end) and sp.CFrame or nil
   for _, p in ipairs(gardens:GetChildren()) do
-    if getPlotOwner(p) ~= myOwner and isOwnerOutside(p) then
+    if p ~= myPlot then
       local plants = p:FindFirstChild("Plants")
       if plants then
         for _, plant in ipairs(plants:GetChildren()) do
@@ -351,11 +315,12 @@ local function doSteal()
     if ok and cf then
       local standPos = cf * CFrame.new(0, 0.5, -2)
       hrp.CFrame = standPos
+      task.wait(0.15)
       keypress(VK_E)
-      for _ = 1, 8 do
+      for _ = 1, 6 do
         if not fVal("AutoSteal") then break end
         hrp.CFrame = standPos
-        task.wait(0.01)
+        task.wait(0.03)
       end
       keyrelease(VK_E)
       stolenCount = stolenCount + 1
