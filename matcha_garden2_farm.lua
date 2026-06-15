@@ -493,6 +493,9 @@ end
 
 local function achtt(fr)
   local tot = 0
+  local anyInStock = false
+  local selCount = seedCount()
+  local visited = 0
   for _, nm in pairs({"NormalShop", "ExclusiveShop"}) do
     if not abRun then return tot end
     local sh = fr:FindFirstChild(nm)
@@ -502,6 +505,7 @@ local function achtt(fr)
         rScrl(sh); task.wait(0.2)
         for _, it in pairs(sh:GetChildren()) do
           if not abRun then ferm(fr); return tot end
+          if visited >= selCount then break end
           if it.Name ~= "Sheckles_Shelf" and it.Name ~= "Robux_Shelf" and it.Name ~= "ItemTemplate" then
             local mf = it:FindFirstChild("Main_Frame")
             if mf then
@@ -511,20 +515,22 @@ local function achtt(fr)
                 if not abRun then ferm(fr); return tot end
                 if seedSelected[it.Name] ~= false then
                   local px, sk = prix(mf), stk(mf)
-                  if px > 0 and sk > 0 then
-                    if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
-                    for _ = 1, sk do
-                      if not abRun then ferm(fr); return tot end
+                  if sk > 0 then
+                    anyInStock = true
+                    if px > 0 then
                       if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
-                      local bp, bs = bb.AbsolutePosition, bb.AbsoluteSize
-                      moveMouse(bp.X + bs.X / 2, bp.Y + bs.Y / 2 + 10)
-                      task.wait(0.05); mouse1click(); task.wait(0.15)
-                      tot = tot + 1
+                      for _ = 1, sk do
+                        if not abRun then ferm(fr); return tot end
+                        if coins() < px then ferm(fr); safeNotify("Not enough coins! " .. tot .. " seeds bought.", "AutoBuy", 5); return tot end
+                        local bp, bs = bb.AbsolutePosition, bb.AbsoluteSize
+                        moveMouse(bp.X + bs.X / 2, bp.Y + bs.Y / 2 + 10)
+                        task.wait(0.05); mouse1click(); task.wait(0.15)
+                        tot = tot + 1
+                      end
+                      task.wait(0.2)
                     end
-                    task.wait(0.2)
-                  else
-                    task.wait(0.15)
                   end
+                  visited = visited + 1
                 end
               end
             end
@@ -532,6 +538,11 @@ local function achtt(fr)
         end
       end
     end
+    if visited >= selCount then break end
+  end
+  if not anyInStock and tot == 0 then
+    ferm(fr); safeNotify("All selected seeds out of stock!", "AutoBuy", 3)
+    return tot
   end
   ferm(fr); safeNotify("Cycle done! " .. tot .. " seeds bought.", "AutoBuy", 5)
   return tot
