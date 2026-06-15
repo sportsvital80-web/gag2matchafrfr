@@ -263,14 +263,17 @@ task.spawn(function()
                 local collected = 0
                 for i, farm in ipairs(cachedFarms) do
                     if not ScriptActive then break end
-                    smoothFly(root, farm.pos, 0.25)
-                    root.CFrame = farm.pos
-                    task.wait(0.06)
-                    pcall(function() keypress(VK_E) end)
-                    task.wait(0.03)
-                    pcall(function() keyrelease(VK_E) end)
-                    task.wait(0.06)
-                    collected = collected + 1
+                    local res = tonumber(farm.model:GetAttribute("ResourcesToCollect")) or 0
+                    if res > 0 then
+                        smoothFly(root, farm.pos, 0.25)
+                        root.CFrame = farm.pos
+                        task.wait(0.06)
+                        pcall(function() keypress(VK_E) end)
+                        task.wait(0.03)
+                        pcall(function() keyrelease(VK_E) end)
+                        task.wait(0.06)
+                        collected = collected + 1
+                    end
                 end
                 if sellOn and sellTP and collected > 0 then
                     doSell()
