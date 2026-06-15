@@ -65,7 +65,7 @@ local function haptic()
 end
 
 local uiPos = Vector2.new(150, 120)
-local RH = 30; local TH = 34; local AH = 2; local SH = 1; local STH = 14; local MAXS = 5; local SLH = 24
+local RH = 30; local TH = 34; local AH = 2; local SH = 1; local STH = 14; local MAXS = 6; local SLH = 24
 local uiS = Vector2.new(390, TH + AH + MAXS * RH + SLH + 6 + SH + 8 + STH + 6)
 local drg, dOff, lastM1, hov, anm = false, Vector2.new(0, 0), false, 0, {}
 
@@ -109,6 +109,7 @@ feat("AutoHarvest", "AUTO HARVEST [1]", "toggle", 0x31)
 feat("AutoLoot",    "AUTO LOOT [2]",    "toggle", 0x32)
 feat("AutoGold",    "AUTO GOLD",        "toggle")
 feat("AutoSell",    "AUTO SELL [3]",    "toggle", 0x33)
+feat("AntiSteal",   "ANTI STEAL",       "toggle")
 feat("ForceBuy",    "BUY",              "action")
 
 -- Sell threshold slider (1-99)
@@ -617,7 +618,64 @@ local function autoSellLoop()
   safeNotify("AutoSell stopped!", "AutoSell", 3)
 end
 
--- Farm loop
+-- Anti Steal loop
+task.spawn(function()
+  while ScriptActive do
+    if fVal("AntiSteal") then
+      local p = findPlot()
+      if p then
+        local ref = p:FindFirstChild("PlotSizeReference")
+        if ref then
+          local hrp = getHRP()
+          if hrp then
+            local ok, refCF = pcall(function() return ref.CFrame end)
+            if ok and refCF then
+              local pos = hrp.Position
+              local refPos = refCF.Position
+              local dist = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(refPos.X, 0, refPos.Z)).Magnitude
+              if dist > 20 then
+                pcall(function()
+                  hrp.CFrame = refCF * CFrame.new(0, -3, 0)
+                  hrp.Velocity = Vector3.new(0, 0, 0)
+                  hrp.RotVelocity = Vector3.new(0, 0, 0)
+                end)
+              else
+                pcall(function()
+                  hrp.Velocity = Vector3.new(0, 0, 0)
+                  hrp.RotVelocity = Vector3.new(0, 0, 0)
+                end)
+              end
+              if not fVal("AutoHarvest") and not fVal("AutoSell") then
+                pcall(function()
+                  hrp.Anchored = true
+                  hrp.CFrame = refCF * CFrame.new(0, -3, 0)
+                  local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+                  if humanoid then humanoid.PlatformStand = true end
+                end)
+              else
+                pcall(function()
+                  hrp.Anchored = false
+                  local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+                  if humanoid then humanoid.PlatformStand = false end
+                end)
+              end
+            end
+          end
+        end
+      end
+    else
+      local hrp = getHRP()
+      if hrp then
+        pcall(function()
+          hrp.Anchored = false
+          local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+          if humanoid then humanoid.PlatformStand = false end
+        end)
+      end
+    end
+    task.wait(0.1)
+  end
+end)
 task.spawn(function()
   print("[Farm] Waiting 3s before starting...")
   task.wait(3)
