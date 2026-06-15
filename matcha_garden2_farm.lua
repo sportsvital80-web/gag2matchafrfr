@@ -65,8 +65,8 @@ local function haptic()
 end
 
 local uiPos = Vector2.new(150, 120)
-local RH = 30; local TH = 34; local AH = 2; local SH = 1; local STH = 14; local MAXS = 5
-local uiS = Vector2.new(390, TH + AH + MAXS * RH + 6 + SH + 8 + STH + 6)
+local RH = 30; local TH = 34; local AH = 2; local SH = 1; local STH = 14; local MAXS = 5; local SLH = 24
+local uiS = Vector2.new(390, TH + AH + MAXS * RH + SLH + 6 + SH + 8 + STH + 6)
 local drg, dOff, lastM1, hov, anm = false, Vector2.new(0, 0), false, 0, {}
 
 local SHD = D("Square", {Size = Vector2.new(uiS.X + 8, uiS.Y + 8), Color = C0(0,0,0), Transparency = 0.4, Filled = true, Visible = true})
@@ -92,6 +92,12 @@ end
 local SEP = D("Square", {Size = Vector2.new(uiS.X - 24, SH), Color = C_SP, Filled = true, Visible = true})
 local STX = D("Text", {Text = "", Size = 11, Color = C_DM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
 
+-- Sell threshold slider
+local SLR_BG  = D("Square", {Size = Vector2.new(160, 6), Color = C_SP, Filled = true, Visible = false})
+local SLR_FG  = D("Square", {Size = Vector2.new(80, 6), Color = C_A, Filled = true, Visible = false})
+local SLR_TX  = D("Text", {Text = "", Size = 11, Color = C_DM, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+local SLR_VL  = D("Text", {Text = "", Size = 11, Color = C_A, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+
 local F = {}
 local function feat(key, label, kind, hotkey)
   local f = {key=key, label=label, kind=kind, value=false, hotkey=hotkey}
@@ -105,6 +111,14 @@ feat("AutoGold",    "AUTO GOLD",        "toggle")
 feat("AutoSell",    "AUTO SELL [3]",    "toggle", 0x33)
 feat("ForceBuy",    "BUY",              "action")
 
+-- Sell threshold slider (1-99)
+local sellThreshold = 80
+local SLIDER_SL, SLIDER_BG, SLIDER_FG, SLIDER_TXT
+local dragSlider = false
+local slEdit = false
+local slText = ""
+local slLastKeys = {}
+
 local function fVal(key)
   for _, f in ipairs(F) do if f.key == key then return f.value end end
   return false
@@ -113,7 +127,6 @@ end
 -- Farm logic
 local VK_E = 0x45
 local gardens = workspace:FindFirstChild("Gardens")
-local INV_MAX = 80
 
 local function countItems()
   local ok, gui = pcall(function()
@@ -124,9 +137,7 @@ local function countItems()
   for _, c in ipairs(gui:GetChildren()) do
     if c:IsA("Frame") then n = n + 1 end
   end
-  local real = math.max(0, n - 10)
-  print("[Items] raw=" .. n .. " real=" .. real)
-  return real
+  return math.max(0, n - 10)
 end
 
 local function findPlot()
@@ -154,19 +165,25 @@ end
 local function doHarvest()
   local hrp = getHRP()
   if not hrp then return end
+  if #harvestCache == 0 then return end
+
+  local first = true
   for _, hp in ipairs(harvestCache) do
-    if not fVal("AutoHarvest") or countItems() >= INV_MAX then break end
+    if not fVal("AutoHarvest") or countItems() >= sellThreshold then break end
     if hp and hp.Parent then
       local ok, cf = pcall(function() return hp.CFrame end)
       if ok and cf then
-        local tp = cf * CFrame.new(0, 1, 0)
-        local sc = hrp.CFrame
-        for t = 0, 1, 0.1 do
-          if not fVal("AutoHarvest") or countItems() >= INV_MAX then break end
-          hrp.CFrame = sc:Lerp(tp, t); task.wait()
+        hrp.CFrame = cf * CFrame.new(0, 1, 0)
+        if first then
+          task.wait(0.5)
+          keypress(VK_E)
+          first = false
         end
-        if countItems() < INV_MAX then
-          hrp.CFrame = tp; keypress(VK_E); task.wait(0.10); keyrelease(VK_E)
+        local waitStart = tick()
+        while hp and hp.Parent and hp:IsDescendantOf(workspace) do
+          if not fVal("AutoHarvest") or countItems() >= sellThreshold then break end
+          if tick() - waitStart > 5 then break end
+          task.wait(0.05)
         end
       end
     end
@@ -221,7 +238,7 @@ local function collectGold()
   if ok and cf then
     hrp.CFrame = cf * CFrame.new(0, 1, 0)
     task.wait(0.1)
-    keypress(VK_E); task.wait(0.15); keyrelease(VK_E)
+    keypress(VK_E); task.wait(1.2); keyrelease(VK_E)
     goldCount = goldCount + 1
     print("[Gold] Collected #" .. goldCount)
   end
@@ -382,13 +399,27 @@ local function clk(o)
   task.wait(0.05); mouse1click(); task.wait(0.05)
 end
 
+local function shakeMouse(x, y, amplitude, cycles)
+  amplitude = amplitude or 15
+  cycles = cycles or 3
+  for _ = 1, cycles do
+    moveMouse(x - amplitude, y)
+    task.wait(0.03)
+    moveMouse(x + amplitude, y)
+    task.wait(0.03)
+  end
+  moveMouse(x, y)
+  task.wait(0.05)
+end
+
 local function rScrl(sh)
   if not sh then return end
+  local p, s = sh.AbsolutePosition, sh.AbsoluteSize
+  local cx = p.X + s.X / 2
+  local cy = p.Y + s.Y / 2
+  shakeMouse(cx, cy, 15, 3)
   local ok = pcall(function() sh.CanvasPosition = Vector2.new(0, 0) end)
   if not ok then
-    local p, s = sh.AbsolutePosition, sh.AbsoluteSize
-    local cx = p.X + s.X / 2
-    local cy = p.Y + s.Y / 2
     mousemoveabs(cx, cy)
     task.wait(0.1)
     for _ = 1, 15 do mousescroll(10); task.wait(0.02) end
@@ -563,6 +594,8 @@ task.spawn(function()
   local soldCycle = false
   while ScriptActive do
     local harvesting = fVal("AutoHarvest")
+    local selling = fVal("AutoSell")
+
     if harvesting then
       pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
       pcall(function() cam.CFrame = CFrame.new(Vector3.new(0, 75, 0), Vector3.new(0, 0, 0)) end)
@@ -574,37 +607,52 @@ task.spawn(function()
     if not plot or not plot.Parent then plot = findPlot() end
     if plot then
       if prevHarvest and not harvesting then
+        pcall(function() keyrelease(VK_E) end)
         local sp = plot:FindFirstChild("SpawnPoint")
         if sp then tp(sp.CFrame * CFrame.new(0, 3, 0)) end
       end
       prevHarvest = harvesting
-      if harvesting then
-        local items = countItems()
-        if items >= INV_MAX and not soldCycle then
+
+      local items = countItems()
+      if selling and items >= 1 and not soldCycle then
+        pcall(function() keyrelease(VK_E) end)
+        soldCycle = true
+        pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+        if abRun then abRun = false; if abTh then pcall(function() task.cancel(abTh) end); abTh = nil end end
+        if not asRun then
+          asRun = true; asTh = task.spawn(autoSellLoop)
+          while asRun and fVal("AutoSell") do task.wait(0.5) end
+          asRun = false
+        end
+        if harvesting and autoBuy then
+          abRun = true; abTh = task.spawn(autoBuyLoop)
+          while abRun and autoBuy do task.wait(0.5) end
+        end
+      elseif harvesting then
+        soldCycle = false
+        scanHarvest(plot); doHarvest()
+        if selling and countItems() >= 1 and not soldCycle then
+          pcall(function() keyrelease(VK_E) end)
           soldCycle = true
-          harvesting = false
           pcall(function() cam.CameraType = Enum.CameraType.Custom end)
-          if abRun then abRun = false; if abTh then task.cancel(abTh); abTh = nil end end
-          if fVal("AutoSell") and not asRun then
+          if abRun then abRun = false; if abTh then pcall(function() task.cancel(abTh) end); abTh = nil end end
+          if not asRun then
             asRun = true; asTh = task.spawn(autoSellLoop)
             while asRun and fVal("AutoSell") do task.wait(0.5) end
             asRun = false
           end
-          if autoBuy then
+          if harvesting and autoBuy then
             abRun = true; abTh = task.spawn(autoBuyLoop)
             while abRun and autoBuy do task.wait(0.5) end
           end
-        else
-          soldCycle = false
-          scanHarvest(plot); doHarvest()
-          hCyc = hCyc + 1
-          if hCyc >= MCYC and RSRC then
-            print("[Farm] Auto-restart after " .. hCyc .. " cycles")
-            _G.MatchaCleanup()
-            task.wait(1)
-            task.spawn(loadstring(RSRC))
-            return
-          end
+        end
+        hCyc = hCyc + 1
+        if hCyc >= MCYC and RSRC then
+          print("[Farm] Auto-restart after " .. hCyc .. " cycles")
+          _G.MatchaCleanup()
+          task.wait(1)
+          task.spawn(loadstring(RSRC))
+          return
         end
       end
       if autoBuy and not abRun and not soldCycle then
@@ -612,12 +660,12 @@ task.spawn(function()
         abTh = task.spawn(autoBuyLoop)
       elseif not autoBuy and abRun then
         abRun = false
-        if abTh then task.cancel(abTh); abTh = nil end
+        if abTh then pcall(function() task.cancel(abTh) end); abTh = nil end
       end
       if autoPet and not ptRun then
         scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
       elseif not autoPet and ptRun then
-        ptRun = false; if ptTh then task.cancel(ptTh); ptTh = nil end
+        ptRun = false; if ptTh then pcall(function() task.cancel(ptTh) end); ptTh = nil end
       end
       if fVal("AutoLoot") then doLoot() end
       if fVal("AutoGold") then collectGold() end
@@ -734,7 +782,28 @@ local function Render()
     STX.Text = "Y " .. yS .. "  |  L " .. lootCount .. "  G " .. goldCount .. "  S " .. stolenCount .. "  B " .. (abRun and "ON" or "OFF") .. "  Se " .. (asRun and "ON" or "OFF") .. "  " .. pi
     STX.Position = Vector2.new(x0 + 14, y0 + uiS.Y - STH - 4)
     SCR_U.Visible = false; SCR_D.Visible = false; SCR_B.Visible = false; CLR.Visible = false
+    -- Sell threshold slider
+    local sly = yy0 + MAXS * RH + 4
+    SLR_TX.Text = "Sell at:"
+    SLR_TX.Position = Vector2.new(x0 + 16, sly)
+    SLR_TX.Visible = true
+    SLR_BG.Position = Vector2.new(x0 + 70, sly + 3)
+    SLR_BG.Visible = true
+    local slPct = (sellThreshold - 1) / 98
+    local slW = math.floor(160 * slPct)
+    if slW < 4 then slW = 4 end
+    SLR_FG.Position = Vector2.new(x0 + 70, sly + 3)
+    SLR_FG.Size = Vector2.new(slW, 6)
+    SLR_FG.Visible = true
+    if slEdit then
+      SLR_VL.Text = slText .. ((tick() * 4 % 1) > 0.5 and "_" or "")
+    else
+      SLR_VL.Text = tostring(sellThreshold)
+    end
+    SLR_VL.Position = Vector2.new(x0 + 240, sly)
+    SLR_VL.Visible = true
   elseif activeTab == "pets" then
+    SLR_BG.Visible = false; SLR_FG.Visible = false; SLR_TX.Visible = false; SLR_VL.Visible = false
     for s = 1, MAXS do SL[s].Visible = false; SC[s].Visible = false; SF[s].Visible = false end
     for s = 1, MAXS do
       local yy = yy0 + (s - 1) * RH
@@ -762,6 +831,7 @@ local function Render()
       SCR_B.Visible = true
     else SCR_B.Visible = false end
   elseif activeTab == "seeds" then
+    SLR_BG.Visible = false; SLR_FG.Visible = false; SLR_TX.Visible = false; SLR_VL.Visible = false
     for s = 1, MAXS do SL[s].Visible = false; SC[s].Visible = false; SF[s].Visible = false end
     for s = 1, MAXS do
       local yy = yy0 + (s - 1) * RH
@@ -838,7 +908,7 @@ task.spawn(function()
               if autoPet and not ptRun then
                 scanPets(); ptRun = true; ptTh = task.spawn(petBuyLoop)
               elseif not autoPet and ptRun then
-                ptRun = false; if ptTh then task.cancel(ptTh); ptTh = nil end
+                ptRun = false; if ptTh then pcall(function() task.cancel(ptTh) end); ptTh = nil end
               end
             else
               local pi = petScroll + s - 1
@@ -895,6 +965,33 @@ task.spawn(function()
       end
     end
 
+    -- Sell threshold slider interaction (farm tab only)
+    if activeTab == "farm" then
+      local slx0 = uiPos.X + 70
+      local sly0 = uiPos.Y + TH + AH + 3 + MAXS * RH + 4 + 3
+      local slAreaX = mx >= slx0 and mx <= slx0 + 160
+      local slAreaY = my >= sly0 - 4 and my <= sly0 + 10
+      -- Click on number to type
+      local nrx = uiPos.X + 240
+      if m1 and not lastM1 and mx >= nrx and mx <= nrx + 30 and my >= sly0 - 4 and my <= sly0 + 14 then
+        slEdit = true
+        slText = ""
+        haptic()
+      elseif m1 and not lastM1 and slEdit then
+        -- Click outside: confirm
+        local val = tonumber(slText)
+        if val and val >= 1 and val <= 99 then sellThreshold = val end
+        slEdit = false; slText = ""
+        haptic()
+      end
+      -- Slider drag
+      if m1 and slAreaX and slAreaY and not slEdit then
+        local pct = math.max(0, math.min(1, (mx - slx0) / 160))
+        sellThreshold = math.max(1, math.min(99, math.floor(pct * 98 + 1 + 0.5)))
+        haptic()
+      end
+    end
+
     -- tab switch click
     if m1 and not lastM1 then
       local tx = uiPos.X + 10; local ty = uiPos.Y + 9; local tabHit = false
@@ -910,6 +1007,33 @@ task.spawn(function()
     end
 
     -- pet/seed scroll via arrow keys + mouse wheel
+    -- Sell threshold number input
+    if slEdit then
+      local numberKeys = {
+        [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
+        [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
+      }
+      for vk, digit in pairs(numberKeys) do
+        if iskeypressed(vk) and not slLastKeys[vk] then
+          if #slText < 2 then slText = slText .. digit end
+        end
+      end
+      if iskeypressed(0x08) and not slLastKeys[0x08] then
+        slText = slText:sub(1, -2)
+      end
+      if iskeypressed(0x0D) and not slLastKeys[0x0D] then
+        local val = tonumber(slText)
+        if val and val >= 1 and val <= 99 then sellThreshold = val end
+        slEdit = false; slText = ""
+      end
+      if iskeypressed(0x1B) and not slLastKeys[0x1B] then
+        slEdit = false; slText = ""
+      end
+    end
+    slLastKeys = {}
+    for _, vk in ipairs({0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x08,0x0D,0x1B}) do
+      slLastKeys[vk] = iskeypressed(vk)
+    end
     local inUI = mx >= uiPos.X and mx <= uiPos.X + uiS.X and my >= uiPos.Y and my <= uiPos.Y + uiS.Y
     pcall(function()
       if activeTab == "pets" and inUI then
@@ -975,14 +1099,15 @@ end)
 
 _G.MatchaCleanup = function()
   ScriptActive = false
+  pcall(function() keyrelease(VK_E) end)
   abRun = false
-  if abTh then task.cancel(abTh); abTh = nil end
+  if abTh then pcall(function() task.cancel(abTh) end); abTh = nil end
   asRun = false
-  if asTh then task.cancel(asTh); asTh = nil end
+  if asTh then pcall(function() task.cancel(asTh) end); asTh = nil end
   ptRun = false
-  if ptTh then task.cancel(ptTh); ptTh = nil end
+  if ptTh then pcall(function() task.cancel(ptTh) end); ptTh = nil end
   pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
-  for _, obj in ipairse(drawObjs) do pcall(function() obj:Remove() end) end
+  for _, obj in ipairs(drawObjs) do pcall(function() obj:Remove() end) end
   print("[Farm] Cleanup done")
 end
 
