@@ -131,7 +131,16 @@ local function buildFarmCache(plot)
     print("[Wheat] Buildings found:", b:GetFullName())
     for _, model in ipairs(b:GetChildren()) do
         local tp = tostring(model:GetAttribute("type"))
+        if tp == "nil" or tp == "" then
+            local ok, attrs = pcall(function() return model:GetAttributes() end)
+            if ok and attrs and attrs.type then tp = tostring(attrs.type) end
+        end
         local res = tonumber(model:GetAttribute("ResourcesToCollect")) or 0
+        if res == 0 then
+            local ok, attrs = pcall(function() return model:GetAttributes() end)
+            if ok and attrs and attrs.ResourcesToCollect then res = tonumber(attrs.ResourcesToCollect) or 0 end
+        end
+        print("[Wheat] Building:", model.Name, "type:", tp, "res:", res)
         if tp == "Farm" then
             local floor = model:FindFirstChild("BuildingFloor10")
             if not floor then
