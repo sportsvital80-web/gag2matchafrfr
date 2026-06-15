@@ -187,17 +187,31 @@ local function doSell()
     pcall(function() keypress(VK_E) end)
     task.wait(0.2)
     pcall(function() keyrelease(VK_E) end)
-    task.wait(1)
+    task.wait(1.5)
 
     local gui = player:FindFirstChild("PlayerGui")
     if not gui then return end
     local dialog = gui:FindFirstChild("DialogOptions")
     if not dialog then return end
+
+    local dialogVisible = false
+    pcall(function() dialogVisible = dialog.Visible end)
+    if not dialogVisible then
+        print("[Wheat] Dialog not visible, retrying...")
+        task.wait(1)
+        pcall(function() dialogVisible = dialog.Visible end)
+        if not dialogVisible then
+            print("[Wheat] Dialog still not visible, skipping sell")
+            return
+        end
+    end
+
     local holder = dialog:FindFirstChild("Holder")
     if not holder then return end
     local inside = holder:FindFirstChild("Inside")
     if not inside then return end
 
+    print("[Wheat] Dialog visible, looking for sell button...")
     for _, btn in ipairs(inside:GetChildren()) do
         local okName = pcall(function() return btn.Name end)
         if okName and btn.Name:lower():find("sell") then
@@ -228,6 +242,7 @@ local function doSell()
             return
         end
     end
+    print("[Wheat] No sell button found!")
 end
 
 task.spawn(function()
