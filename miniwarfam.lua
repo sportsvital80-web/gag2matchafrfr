@@ -150,13 +150,30 @@ end
 local sellTP = nil
 local sellFolder = workspace:FindFirstChild("Teleports")
 if sellFolder then
+    print("[Wheat] Teleports folder found")
+    for _, child in ipairs(sellFolder:GetChildren()) do
+        print("[Wheat]   " .. child.Name .. " (" .. child.ClassName .. ")")
+    end
     sellTP = sellFolder:FindFirstChild("sell") or sellFolder:FindFirstChild("Sell")
+    if not sellTP then
+        for _, child in ipairs(sellFolder:GetChildren()) do
+            if child.Name:lower():find("sell") then sellTP = child; break end
+        end
+    end
+else
+    print("[Wheat] No Teleports folder!")
 end
 if sellTP then
     local ok, cf = pcall(function() return sellTP.CFrame end)
-    if ok and cf then sellTP = CFrame.new(cf.X, cf.Y + 3, cf.Z) end
+    if ok and cf then
+        sellTP = CFrame.new(cf.X, cf.Y + 3, cf.Z)
+        print("[Wheat] Sell TP cached at " .. tostring(cf.Position))
+    else
+        print("[Wheat] Can't read sellTP CFrame")
+        sellTP = nil
+    end
 else
-    print("[Wheat] No sell teleport found")
+    print("[Wheat] No sell teleport found!")
 end
 
 local function moveMouse(x, y)
@@ -266,8 +283,11 @@ task.spawn(function()
                     end
                 end
                 if sellOn and sellTP and collected > 0 then
+                    print("[Wheat] Starting sell...")
                     doSell()
                     task.wait(2)
+                elseif sellOn and not sellTP then
+                    print("[Wheat] Sell ON but no sellTP!")
                 end
                 if collected > 0 then print("[Wheat] Round:", collected .. "/" .. #cachedFarms) end
             end
