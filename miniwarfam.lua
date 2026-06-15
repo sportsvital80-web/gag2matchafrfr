@@ -252,6 +252,7 @@ task.spawn(function()
                 end
                 if sellOn and sellTP and collected > 0 then
                     doSell()
+                    task.wait(2)
                 end
                 if collected > 0 then print("[Wheat] Round:", collected .. "/" .. #cachedFarms) end
             end
@@ -321,6 +322,11 @@ _G.MatchaCleanup = function()
     ScriptActive = false
     for _, obj in ipairs(drawObjs) do pcall(function() obj:Remove() end) end
 end
+
+players.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    if ScriptActive then _G.MatchaCleanup() end
+end)
 
 safeNotify("Wheat Collector Loaded!", "Wheat", 3)
 print("[Wheat] plot:", myPlot and myPlot.Name or "NONE")
