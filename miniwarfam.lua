@@ -196,10 +196,14 @@ local function doSell()
     if not root or not sellTP then return end
     smoothFly(root, sellTP, 0.12)
     task.wait(0.3)
+
+    root.CFrame = sellTP
     pcall(function() keypress(VK_E) end)
     task.wait(0.2)
     pcall(function() keyrelease(VK_E) end)
-    task.wait(1)
+    task.wait(1.5)
+
+    root.CFrame = sellTP
 
     local gui = player:FindFirstChild("PlayerGui")
     if not gui then return end
@@ -210,12 +214,16 @@ local function doSell()
     local inside = holder:FindFirstChild("Inside")
     if not inside then return end
 
+    print("[Wheat] Dialog found, scanning...")
+
     for _, btn in ipairs(inside:GetChildren()) do
         local okName = pcall(function() return btn.Name end)
         if okName and btn.Name:lower():find("sell") then
             print("[Wheat] Found sell button by name: " .. btn.Name)
+            root.CFrame = sellTP
             clk(btn)
             task.wait(0.5)
+            root.CFrame = sellTP
             return
         end
     end
@@ -225,8 +233,10 @@ local function doSell()
             local ok, txt = pcall(function() return btn.Text end)
             if ok and txt and txt:lower():find("sell") then
                 print("[Wheat] Clicking: " .. txt)
+                root.CFrame = sellTP
                 clk(btn)
                 task.wait(0.5)
+                root.CFrame = sellTP
                 return
             end
         end
@@ -235,11 +245,14 @@ local function doSell()
     for _, btn in ipairs(inside:GetChildren()) do
         if btn:IsA("TextButton") or btn:IsA("ImageButton") then
             print("[Wheat] Clicking first button in dialog")
+            root.CFrame = sellTP
             clk(btn)
             task.wait(0.5)
+            root.CFrame = sellTP
             return
         end
     end
+    print("[Wheat] No sell button found!")
 end
 
 task.spawn(function()
