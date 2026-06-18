@@ -120,15 +120,23 @@ end
 
 local function isFatigueMaxed()
   local cur, mx = getFatigue()
-  if cur and mx and cur >= mx then return true end
+  if cur and mx and cur >= mx then
+    wasFatigueMaxed = true
+    return true
+  end
   return false
 end
 
 local function isFatigueEmpty()
   local cur, mx = getFatigue()
-  if cur == nil then return false end
-  if cur == 0 then return true end
-  return false
+  if wasFatigueMaxed then
+    if cur == nil or cur == 0 then
+      wasFatigueMaxed = false
+      return true
+    end
+    return false
+  end
+  return true
 end
 
 -- GYM
@@ -196,6 +204,7 @@ end
 
 local curlLocked = false
 local curlUseUp = true
+local wasFatigueMaxed = false
 
 local function autoCurlLoop()
   curlLocked = false
