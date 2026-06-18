@@ -118,25 +118,20 @@ local function getFatigue()
   return nil, nil
 end
 
-local function isFatigueMaxed()
-  local cur, mx = getFatigue()
-  if cur and mx and cur >= mx then
-    wasFatigueMaxed = true
+local function isStuck(btn)
+  if not btn then return false end
+  local p1 = btn.AbsolutePosition
+  if not p1 then return false end
+  local x1, y1 = p1.X, p1.Y
+  task.wait(1)
+  local p2 = btn.AbsolutePosition
+  if not p2 then return true end
+  local dx = math.abs(p2.X - x1)
+  local dy = math.abs(p2.Y - y1)
+  if dx < 1 and dy < 1 then
     return true
   end
   return false
-end
-
-local function isFatigueEmpty()
-  local cur, mx = getFatigue()
-  if wasFatigueMaxed then
-    if cur == nil or cur == 0 then
-      wasFatigueMaxed = false
-      return true
-    end
-    return false
-  end
-  return true
 end
 
 -- GYM
@@ -171,15 +166,23 @@ end
 
 local function gymLoop()
   while gymRun do
-    if isFatigueMaxed() then
-      while gymRun and not isFatigueEmpty() do
-        task.wait(0.1)
-      end
-    end
     local btn = getGymBtn()
     if btn then
       gymClick()
       gymCount = gymCount + 1
+      if isStuck(btn) then
+        while gymRun do
+          task.wait(0.2)
+          local b = getGymBtn()
+          if not b then break end
+          local p1 = b.AbsolutePosition
+          task.wait(0.5)
+          local p2 = b.AbsolutePosition
+          if p1 and p2 and (math.abs(p2.X - p1.X) > 1 or math.abs(p2.Y - p1.Y) > 1) then
+            break
+          end
+        end
+      end
     end
     task.wait(0.02)
   end
@@ -204,16 +207,10 @@ end
 
 local curlLocked = false
 local curlUseUp = true
-local wasFatigueMaxed = false
 
 local function autoCurlLoop()
   curlLocked = false
   while curlRun do
-    if isFatigueMaxed() then
-      while curlRun and not isFatigueEmpty() do
-        task.wait(0.1)
-      end
-    end
     local btn = getCurlBtn()
     if btn then
       local p, s = btn.AbsolutePosition, btn.AbsoluteSize
@@ -240,6 +237,19 @@ local function autoCurlLoop()
         task.wait(0.02)
         mouse1release()
         curlCount = curlCount + 1
+        if isStuck(btn) then
+          while curlRun do
+            task.wait(0.2)
+            local b = getCurlBtn()
+            if not b then break end
+            local p1 = b.AbsolutePosition
+            task.wait(0.5)
+            local p2 = b.AbsolutePosition
+            if p1 and p2 and (math.abs(p2.X - p1.X) > 1 or math.abs(p2.Y - p1.Y) > 1) then
+              break
+            end
+          end
+        end
       end
       task.wait(0.05)
     else
