@@ -1,0 +1,600 @@
+-- ============================================================
+-- MATCHA: PAN AUTO v8.3  —  Forward Declaration, All Locals First
+-- ============================================================
+if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
+
+local ScriptActive  = true
+local running       = false
+local perfectCount  = 0
+local totalAttempts = 0
+local currentFill   = 0
+
+local player = game:GetService("Players").LocalPlayer
+
+-- ========================
+--   FORWARD DECLARATIONS
+-- ========================
+
+local getHRP
+local savePosition
+local tpTo
+local safeNotify
+local getChar
+local getHumanoid
+local getStatValue
+local syncFillFromGUI
+local getDigBarElements
+local getY
+local isLineInZone
+local panAtSand
+local sellAtWater
+local runCycle
+
+-- ========================
+--   POSITIONS
+-- ========================
+
+local posSand = nil
+local posWater = nil
+
+-- ========================
+--   FUNCTION DEFINITIONS
+-- ========================
+
+getHRP = function()
+    local char = player.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+end
+
+savePosition = function(slot)
+    local hrp = getHRP()
+    if not hrp then
+        safeNotify("No character — can't save position", 3)
+        print("[POS] ERROR: No HRP")
+        return false
+    end
+    local ok, cf = pcall(function() return hrp.CFrame end)
+    if not ok or not cf then
+        safeNotify("Failed to read position", 3)
+        print("[POS] ERROR: CFrame read failed")
+        return false
+    end
+    if slot == 1 then
+        posSand = cf
+        safeNotify("Position 1 (SAND) saved", 3)
+        print("[POS] SAND saved: " .. tostring(cf.Position))
+    else
+        posWater = cf
+        safeNotify("Position 2 (WATER) saved", 3)
+        print("[POS] WATER saved: " .. tostring(cf.Position))
+    end
+    return true
+end
+
+tpTo = function(cf)
+    local hrp = getHRP()
+    if not hrp or not cf then return false end
+    pcall(function() hrp.CFrame = cf end)
+    return true
+end
+
+safeNotify = function(msg, dur)
+    pcall(function() notify(tostring(msg), "PanAuto", dur or 3) end)
+end
+
+getChar = function() return player.Character end
+
+getHumanoid = function()
+    local c = getChar()
+    return c and (c:FindFirstChild("Humanoid") or c:FindFirstChildOfClass("Humanoid"))
+end
+
+getStatValue = function(name)
+    local stats = player:FindFirstChild("Stats")
+    if not stats then return nil end
+    local attr = stats:GetAttribute(name)
+    if attr then return tonumber(attr) end
+    local child = stats:FindFirstChild(name)
+    return child and child:IsA("ValueBase") and tonumber(child.Value) or nil
+end
+
+-- ========================
+--   CAPACITY TRACKER
+-- ========================
+
+local cachedLabel = nil
+
+syncFillFromGUI = function(capacity)
+    if not capacity or capacity <= 0 then return false end
+    if cachedLabel and cachedLabel.Parent then
+        local curStr, capStr = string.match(cachedLabel.Text or "", "^%s*([%d%,%.]+)%s*/%s*([%d%,%.]+)%s*$")
+        if curStr and capStr then
+            local cap = tonumber((string.gsub(capStr, ",", "")))
+            if cap and math.floor(cap) == math.floor(capacity) then
+                local cur = tonumber((string.gsub(curStr, ",", "")))
+                if cur then currentFill = cur; return true end
+            end
+        end
+    end
+    local gui = player:FindFirstChild("PlayerGui")
+    if not gui then return false end
+    for _, d in ipairs(gui:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text then
+            local curStr, capStr = string.match(d.Text, "^%s*([%d%,%.]+)%s*/%s*([%d%,%.]+)%s*$")
+            if curStr and capStr then
+                local cur = tonumber((string.gsub(curStr, ",", "")))
+                local cap = tonumber((string.gsub(capStr, ",", "")))
+                if cur and cap and math.floor(cap) == math.floor(capacity) then
+                    currentFill = cur; cachedLabel = d; return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- ========================
+--   DIGBAR ACCESS
+-- ========================
+
+getDigBarElements = function()
+    local gui, toolUI, digBar, gf, ln
+    pcall(function()
+        gui    = player.PlayerGui
+        toolUI = gui and gui:FindFirstChild("ToolUI")
+        digBar = toolUI and toolUI:FindFirstChild("DigBar")
+        gf     = digBar and digBar:FindFirstChild("GradientFrame")
+        ln     = digBar and digBar:FindFirstChild("Line")
+    end)
+    return digBar, gf, ln
+end
+
+getY = function(obj)
+    if not obj then return nil end
+    local ok, y = pcall(function() return obj.AbsolutePosition.Y end)
+    if ok and y then return y end
+    return nil
+end
+
+isLineInZone = function(gf, ln)
+    local gY = getY(gf)
+    local lY = getY(ln)
+    if not gY or not lY then return false end
+    return math.abs(lY - gY) < 1.5
+end
+
+-- ========================
+--   PAN LOOP (SAND PHASE)
+-- ========================
+
+panAtSand = function()
+    if posSand then tpTo(posSand) end
+    task.wait(0.3)
+
+    local sandRunning = true
+
+    while sandRunning and running and ScriptActive do
+        pcall(function()
+            if not getChar() or not getHumanoid() then
+                pcall(function() mouse1release() end)
+                task.wait(0.5)
+                return
+            end
+
+            local cap = getStatValue("Capacity")
+            if cap then
+                syncFillFromGUI(cap)
+                if currentFill >= cap then
+                    sandRunning = false
+                    pcall(function() mouse1release() end)
+                    return
+                end
+            end
+
+            pcall(function() mouse1press() end)
+
+            local digBar, gf, ln
+            local t0 = os.clock()
+            local barVisible = false
+            while sandRunning and running and ScriptActive and (os.clock() - t0) < 0.5 do
+                digBar, gf, ln = getDigBarElements()
+                if digBar and gf and ln then
+                    local _, gy = pcall(function() return gf.AbsolutePosition.Y end)
+                    if gy then barVisible = true; break end
+                end
+                task.wait()
+            end
+
+            if not barVisible then
+                pcall(function() mouse1release() end)
+                return
+            end
+
+            task.wait(0.05)
+
+            local released = false
+            local t1 = os.clock()
+            while sandRunning and running and ScriptActive and not released and (os.clock() - t1) < 2 do
+                digBar, gf, ln = getDigBarElements()
+                if not digBar or not gf or not ln then
+                    pcall(function() mouse1release() end)
+                    released = true
+                    totalAttempts = totalAttempts + 1
+                    break
+                end
+
+                if isLineInZone(gf, ln) then
+                    pcall(function() mouse1release() end)
+                    released = true
+                    totalAttempts = totalAttempts + 1
+                    perfectCount = perfectCount + 1
+
+                    local digAmt = getStatValue("DigAmount") or 0
+                    local capNow = getStatValue("Capacity")
+                    if capNow then
+                        if not syncFillFromGUI(capNow) then
+                            currentFill = currentFill + digAmt
+                        end
+                    end
+                    break
+                end
+
+                task.wait()
+            end
+
+            if not released then
+                pcall(function() mouse1release() end)
+                totalAttempts = totalAttempts + 1
+            end
+
+            local t2 = os.clock()
+            while sandRunning and running and ScriptActive and (os.clock() - t2) < 1 do
+                digBar, gf, ln = getDigBarElements()
+                if not digBar or not gf or not ln then break end
+                local _, gy = pcall(function() return gf.AbsolutePosition.Y end)
+                if not gy then break end
+                task.wait()
+            end
+
+            task.wait(0.2)
+        end)
+
+        task.wait()
+    end
+
+    pcall(function() mouse1release() end)
+end
+
+-- ========================
+--   SELL LOOP (WATER PHASE)
+-- ========================
+
+sellAtWater = function()
+    if posWater then tpTo(posWater) end
+    task.wait(0.3)
+
+    local sellRunning = true
+    while sellRunning and running and ScriptActive do
+        pcall(function()
+            local cap = getStatValue("Capacity")
+            if cap then
+                syncFillFromGUI(cap)
+                if currentFill <= 0 then
+                    sellRunning = false
+                    return
+                end
+            end
+
+            for _ = 1, 10 do
+                if not sellRunning or not running or not ScriptActive then break end
+                pcall(function() mouse1click() end)
+                task.wait(0.1)
+            end
+        end)
+    end
+
+    pcall(function() mouse1release() end)
+end
+
+-- ========================
+--   MAIN CYCLE
+-- ========================
+
+runCycle = function()
+    safeNotify("Cycle started — Sand → Water → Repeat", 2)
+
+    while running and ScriptActive do
+        panAtSand()
+        if not running or not ScriptActive then break end
+        sellAtWater()
+        if not running or not ScriptActive then break end
+
+        local cap = getStatValue("Capacity")
+        if cap then
+            syncFillFromGUI(cap)
+            if currentFill > 0 then task.wait(0.5) end
+        end
+    end
+
+    pcall(function() mouse1release() end)
+    safeNotify("Cycle stopped. Perfect: " .. perfectCount .. "/" .. totalAttempts, 3)
+end
+
+-- ========================
+--   UI — FARM HUB SHELL
+-- ========================
+
+local drawObjs = {}
+local function D(typ, props)
+    local obj = Drawing.new(typ)
+    for k, v in pairs(props) do obj[k] = v end
+    table.insert(drawObjs, obj)
+    return obj
+end
+
+local C0 = Color3.fromRGB
+local C_A  = C0(0, 212, 170)
+local C_BG = C0(14, 14, 22)
+local C_TP = C0(24, 24, 38)
+local C_TX = C0(225, 225, 235)
+local C_DM = C0(100, 100, 115)
+local C_TO = C0(55, 55, 72)
+local C_AC = C0(255, 186, 76)
+local C_SN = C0(110, 110, 126)
+local C_SP = C0(30, 30, 48)
+
+local function lerpColor(a, b, t)
+    return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
+end
+
+local function haptic()
+    pcall(function()
+        local UIS = game:GetService("UserInputService")
+        UIS.HapticFeedback = Enum.HapticFeedbackType.HighFrequencyVibration
+        task.delay(0.05, function()
+            pcall(function() UIS.HapticFeedback = Enum.HapticFeedbackType.End end)
+        end)
+    end)
+end
+
+-- Window geometry
+local uiPos = Vector2.new(150, 120)
+local RH = 30
+local TH = 34
+local AH = 2
+local SH = 1
+local STH = 14
+local MAXS = 6
+local uiS = Vector2.new(340, TH + AH + MAXS * RH + STH + 12)
+
+local drg, dOff, lastM1, hov = false, Vector2.new(0, 0), false, 0
+
+-- Drawing objects
+local SHD = D("Square", {Size = Vector2.new(uiS.X + 8, uiS.Y + 8), Color = C0(0,0,0), Transparency = 0.4, Filled = true, Visible = true})
+local BG  = D("Square", {Size = uiS, Color = C_BG, Filled = true, Visible = true})
+local TB  = D("Square", {Size = Vector2.new(uiS.X, TH), Color = C_TP, Filled = true, Visible = true})
+local AL  = D("Square", {Size = Vector2.new(uiS.X, AH), Color = C_A, Filled = true, Visible = true})
+local TT  = D("Text",   {Text = "PAN AUTO v8.3", Size = 14, Color = C_A, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+local SEP = D("Square", {Size = Vector2.new(uiS.X - 24, SH), Color = C_SP, Filled = true, Visible = true})
+local STX = D("Text", {Text = "", Size = 11, Color = C_DM, Outline = true, Visible = true, Font = Drawing.Fonts.System})
+
+-- Toggle rendering cache
+local SL, SC, SF = {}, {}, {}
+local anm = {}
+for i = 1, MAXS do
+    SL[i] = D("Text",   {Text = "", Size = 13, Color = C_TX, Outline = true, Visible = false, Font = Drawing.Fonts.System})
+    SC[i] = D("Circle", {Radius = 9, Thickness = 2, Color = C_TO, Filled = false, Visible = false})
+    SF[i] = D("Circle", {Radius = 6, Color = C_A, Filled = true, Visible = false})
+    anm[i] = 0
+end
+
+-- Feature definitions
+local F = {}
+local function feat(key, label, kind)
+    local f = {key=key, label=label, kind=kind, value=false}
+    table.insert(F, f)
+    return f
+end
+
+feat("AutoPan",    "AUTO PAN",          "toggle")
+feat("ShowStats",  "SHOW STATS",        "toggle")
+feat("SetPosSand", "SET POS 1 (SAND)",  "action")
+feat("SetPosWater","SET POS 2 (WATER)", "action")
+
+local function fVal(key)
+    for _, f in ipairs(F) do if f.key == key then return f.value end end
+    return false
+end
+
+-- ========================
+--   UI RENDER
+-- ========================
+
+local function Render()
+    local x0, y0 = uiPos.X, uiPos.Y
+
+    SHD.Position = Vector2.new(x0 - 4, y0 - 4)
+    BG.Position  = Vector2.new(x0, y0)
+    TB.Position  = Vector2.new(x0, y0)
+    AL.Position  = Vector2.new(x0, y0 + TH)
+    TT.Position  = Vector2.new(x0 + uiS.X - 130, y0 + 9)
+
+    local yy0 = y0 + TH + AH + 6
+    for s = 1, MAXS do
+        local f = F[s]
+        if not f then
+            SL[s].Visible = false; SC[s].Visible = false; SF[s].Visible = false
+        else
+            local yy = yy0 + (s - 1) * RH
+            local ih = (hov == s)
+            local lc = C_TX
+            if f.kind == "action" then lc = C_AC elseif f.kind == "soon" then lc = C_SN elseif f.value then lc = C_A end
+            local txt = "   " .. f.label
+            if f.kind == "action" then txt = ">> " .. f.label end
+            SL[s].Text = txt; SL[s].Position = Vector2.new(x0 + 16, yy)
+            if ih then
+                if f.kind == "action" then SL[s].Color = C0(255, 210, 120)
+                elseif f.value then SL[s].Color = C_A
+                else SL[s].Color = C_TX end
+            else
+                SL[s].Color = lc
+            end
+            SL[s].Visible = true
+
+            if f.kind == "toggle" then
+                SC[s].Position = Vector2.new(x0 + uiS.X - 28, yy + 8)
+                SC[s].Color = f.value and C_A or C_TO; SC[s].Visible = true
+                SF[s].Position = Vector2.new(x0 + uiS.X - 28, yy + 8)
+                if f.value then anm[s] = math.min(1, anm[s] + 0.08) else anm[s] = math.max(0, anm[s] - 0.08) end
+                if anm[s] > 0.01 then
+                    SF[s].Visible = true; SF[s].Radius = 1 + anm[s] * 5
+                    SF[s].Color = lerpColor(C_A, C_TO, 1 - anm[s])
+                else SF[s].Visible = false end
+            else
+                SC[s].Visible = false; SF[s].Visible = false
+            end
+        end
+    end
+
+    SEP.Position = Vector2.new(x0 + 12, y0 + uiS.Y - STH - 10)
+    local status = "P: " .. perfectCount .. "/" .. totalAttempts
+    if currentFill > 0 then
+        local cap = getStatValue("Capacity") or 0
+        status = status .. "  |  Fill: " .. math.floor(currentFill) .. "/" .. math.floor(cap)
+    end
+    if posSand then status = status .. "  |  S1" else status = status .. "  |  S1?" end
+    if posWater then status = status .. " W2" else status = status .. " W2?" end
+    if running then status = status .. "  |  RUNNING" else status = status .. "  |  IDLE" end
+    STX.Text = status
+    STX.Position = Vector2.new(x0 + 14, y0 + uiS.Y - STH - 4)
+end
+
+-- ========================
+--   UI INPUT LOOP
+-- ========================
+
+task.spawn(function()
+    while ScriptActive do
+        task.wait(0.016)
+        local mx, my = 0, 0
+        pcall(function() local m = player:GetMouse(); mx = m.X; my = m.Y end)
+        local m1 = false
+        pcall(function() m1 = ismouse1pressed() end)
+
+        local yy0 = uiPos.Y + TH + AH + 6
+        hov = 0
+
+        -- Hover detection
+        for s = 1, MAXS do
+            local yy = yy0 + (s - 1) * RH
+            if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then
+                hov = s; break
+            end
+        end
+
+        -- Click handling
+        if m1 and not lastM1 then
+            local clickedUI = false
+            for s = 1, MAXS do
+                local f = F[s]
+                if not f then continue end
+                local yy = yy0 + (s - 1) * RH
+                if mx >= uiPos.X + 8 and mx <= uiPos.X + uiS.X - 8 and my >= yy - 4 and my <= yy + RH then
+                    clickedUI = true
+
+                    if f.kind == "toggle" then
+                        f.value = not f.value; haptic()
+                        print("[UI] TOGGLED: " .. f.key .. " = " .. tostring(f.value))
+
+                        if f.key == "AutoPan" then
+                            running = f.value
+                            if running then
+                                if not posSand or not posWater then
+                                    f.value = false; running = false
+                                    safeNotify("Set both positions first!", 3)
+                                else
+                                    perfectCount = 0; totalAttempts = 0; currentFill = 0
+                                    task.spawn(runCycle)
+                                end
+                            else
+                                pcall(function() mouse1release() end)
+                            end
+                        end
+
+                        local lname = f.label:match("^(.-)%s*%[") or f.label
+                        safeNotify(lname .. ": " .. (f.value and "ON" or "OFF"), "Toggle", 2)
+
+                    elseif f.kind == "action" then
+                        haptic()
+                        print("[UI] ACTION: " .. f.key)
+                        if f.key == "SetPosSand" then
+                            savePosition(1)
+                        elseif f.key == "SetPosWater" then
+                            savePosition(2)
+                        end
+                    end
+                end
+            end
+
+            if not clickedUI and mx >= uiPos.X and mx <= uiPos.X + uiS.X and my >= uiPos.Y and my <= uiPos.Y + TH then
+                drg = true; dOff = Vector2.new(mx - uiPos.X, my - uiPos.Y)
+            end
+        end
+
+        if drg then
+            if m1 then uiPos = Vector2.new(mx - dOff.X, my - dOff.Y) else drg = false end
+        end
+
+        lastM1 = m1
+        pcall(Render)
+    end
+end)
+
+-- ========================
+--   MID-CLICK HOTKEY
+-- ========================
+
+task.spawn(function()
+    local lastMB = false
+    while ScriptActive do
+        local mbDown = false
+        pcall(function() mbDown = iskeypressed(0x04) end)
+
+        if mbDown and not lastMB then
+            if not posSand or not posWater then
+                safeNotify("Set both positions first!", 3)
+            else
+                running = not running
+                local f = F[1]
+                if f then f.value = running end
+
+                if running then
+                    perfectCount = 0; totalAttempts = 0; currentFill = 0
+                    task.spawn(runCycle)
+                    safeNotify("AutoPan: ON (Mid-Click)", 2)
+                else
+                    pcall(function() mouse1release() end)
+                    safeNotify("AutoPan: OFF (Mid-Click)", 2)
+                end
+            end
+        end
+
+        lastMB = mbDown
+        task.wait(0.05)
+    end
+end)
+
+-- ========================
+--       CLEANUP
+-- ========================
+
+_G.MatchaCleanup = function()
+    ScriptActive = false; running = false
+    pcall(function() mouse1release() end)
+    for _, obj in ipairs(drawObjs) do pcall(function() obj:Remove() end) end
+    print("[PanAuto] Cleanup done")
+end
+
+safeNotify("Pan Auto v8.3 Loaded — Forward declarations", 3)
+print("[PanAuto] Ready — All locals declared before assignment")
