@@ -1,0 +1,760 @@
+-- [[ MATCHA: STANDALONE CRYSTAL ESP (SCREEN UI) ]] --
+-- Architecture:
+--   1. SCAN ONCE on startup → creates Drawing objects for every crystal immediately
+--   2. ChildAdded / ChildRemoved → reactively adds/removes crystals, no polling
+--   3. Heartbeat → only WorldToScreen + set position/visible on existing Drawings (zero allocation)
+--   4. UI loop → fully independent task.spawn, owns its thread completely
+-- ======================================================================
+
+if _G.CrystalESPCleanup then pcall(_G.CrystalESPCleanup) end
+
+local ScriptActive  = true
+local RunService    = game:GetService("RunService")
+local Players       = game:GetService("Players")
+local LP            = Players.LocalPlayer
+
+local Mouse = nil
+pcall(function() Mouse = LP:GetMouse() end)
+
+local WorldToScreen  = WorldToScreen
+local iskeypressed   = iskeypressed
+local function safeKey(vk)
+    if not iskeypressed then return false end
+    return iskeypressed(vk)
+end
+
+-- ======================================================================
+-- TIER COLOURS
+-- ======================================================================
+local TierColors = {
+    Common    = Color3.fromRGB(180,180,180),
+    Uncommon  = Color3.fromRGB(50,220,50),
+    Rare      = Color3.fromRGB(50,150,255),
+    Epic      = Color3.fromRGB(150,50,220),
+    Legendary = Color3.fromRGB(255,150,0),
+    Mythic    = Color3.fromRGB(255,50,50),
+    Divine    = Color3.fromRGB(255,220,50),
+}
+local dynamicColors = {}
+local colorList = {
+    Color3.fromRGB(0,255,255), Color3.fromRGB(255,0,255), Color3.fromRGB(255,255,0),
+    Color3.fromRGB(255,128,0), Color3.fromRGB(0,255,128), Color3.fromRGB(128,0,255),
+}
+local colorIndex = 1
+local function getTierColor(n)
+    for name, col in pairs(TierColors) do
+        if string.find(string.lower(n), string.lower(name)) then return col end
+    end
+    if dynamicColors[n] then return dynamicColors[n] end
+    local c = colorList[colorIndex]; dynamicColors[n] = c
+    colorIndex = (colorIndex % #colorList) + 1
+    return c
+end
+
+-- ======================================================================
+-- CRYSTAL DATA EXTRACTION (CACHED)
+-- ======================================================================
+local dataCache = {}   -- [mainPart] = { TierName, Value, Weight }
+
+local INVALID_NAMES = {
+    proximityprompt=true,touchinterest=true,weight=true,value=true,
+    crystalglow=true,magicaura=true,unknown=true,part=true,meshpart=true,
+    attachment=true,glow=true,aura=true,emitter=true,particle=true,
+    sound=true,billboardgui=true,textlabel=true,selectionbox=true,
+    light=true,pointlight=true,spotlight=true,surfacegui=true,
+    decals=true,decal=true,texture=true,weld=true,motor6d=true,
+    alignposition=true,alignorientation=true,things=true,crystals=true,
+    workspace=true,crystal=true,
+}
+local function isInvalidTier(t)
+    if not t or t == "" then return true end
+    local lo = string.lower(t)
+    if tonumber(lo) then return true end
+    if INVALID_NAMES[lo] then return true end
+    return string.find(lo,"prompt") or string.find(lo,"interest") or
+           string.find(lo,"glow")   or string.find(lo,"aura")     or
+           string.find(lo,"weld")   or string.find(lo,"particle") or
+           string.find(lo,"light")  or string.find(lo,"effect")
+end
+
+local function safeReadValue(instance)
+    if not instance then return nil end
+    local ok, val = pcall(function() return instance.Value end)
+    return ok and val or nil
+end
+
+local function getCrystalData(part)
+    if dataCache[part] then
+        local d = dataCache[part]
+        return d.TierName, d.Value, d.Weight
+    end
+    local parent = part.Parent
+    -- TierName
+    local tier = part:GetAttribute("TierName") or part:GetAttribute("Tier")
+    if not tier and parent then tier = parent:GetAttribute("TierName") or parent:GetAttribute("Tier") end
+    if not tier then
+        local c = part:FindFirstChild("TierName") or part:FindFirstChild("Tier")
+        if not c and parent then c = parent:FindFirstChild("TierName") or parent:FindFirstChild("Tier") end
+        if c then
+            local cv = safeReadValue(c)
+            tier = cv and tostring(cv) or c.Name
+        elseif parent and parent ~= game.Workspace and parent.Name ~= "Crystals" and parent.Name ~= "Things" then
+            tier = parent.Name
+        else tier = part.Name end
+    end
+    tier = tostring(tier)
+    -- Value
+    local val = part:GetAttribute("Value") or part:GetAttribute("Price") or part:GetAttribute("Worth")
+    if not val and parent then val = parent:GetAttribute("Value") or parent:GetAttribute("Price") or parent:GetAttribute("Worth") end
+    if val then val = tonumber(val) or 0
+    else
+        local c = part:FindFirstChild("Value") or part:FindFirstChild("Price") or part:FindFirstChild("Worth")
+        if not c and parent then c = parent:FindFirstChild("Value") or parent:FindFirstChild("Price") or parent:FindFirstChild("Worth") end
+        local cv = safeReadValue(c)
+        val = cv and tonumber(cv) or 0
+    end
+    -- Weight
+    local wgt = part:GetAttribute("Weight") or part:GetAttribute("Mass")
+    if not wgt and parent then wgt = parent:GetAttribute("Weight") or parent:GetAttribute("Mass") end
+    if wgt then wgt = tonumber(wgt) or 0
+    else
+        local c = part:FindFirstChild("Weight") or part:FindFirstChild("Mass")
+        if not c and parent then c = parent:FindFirstChild("Weight") or parent:FindFirstChild("Mass") end
+        local cv = safeReadValue(c)
+        wgt = cv and tonumber(cv) or 0
+    end
+
+    local d = { TierName = tier, Value = val, Weight = wgt }
+    dataCache[part] = d
+    return tier, val, wgt
+end
+
+-- ======================================================================
+-- DRAWING UI FACTORY
+-- ======================================================================
+local drawObjs = {}
+local function D(typ, props)
+    local obj = Drawing.new(typ)
+    for k,v in pairs(props) do obj[k]=v end
+    table.insert(drawObjs, obj)
+    return obj
+end
+
+-- ======================================================================
+-- SCREEN UI ELEMENTS
+-- ======================================================================
+local uiPos       = Vector2.new(150,120)
+local uiSize      = Vector2.new(380,480)
+local dragging    = false
+local dragOff     = Vector2.new(0,0)
+local lastM1      = false
+local activeTab   = 1
+local typing      = false
+local typeBuffer  = ""
+local typingKey   = nil
+local uiNeedsUpdate = true
+
+local Shadow   = D("Square",{Size=Vector2.new(uiSize.X+6,uiSize.Y+6),Color=Color3.fromRGB(0,0,0),Transparency=0.35,Filled=true,Visible=true})
+local MainBG   = D("Square",{Size=uiSize,Color=Color3.fromRGB(12,12,16),Filled=true,Visible=true})
+local TopBar   = D("Square",{Size=Vector2.new(uiSize.X,30),Color=Color3.fromRGB(22,22,28),Filled=true,Visible=true})
+local AccLine  = D("Square",{Size=Vector2.new(uiSize.X,2),Color=Color3.fromRGB(0,212,170),Filled=true,Visible=true})
+local TitleTxt = D("Text",  {Text="MATCHA // CRYSTAL ESP",Size=14,Color=Color3.fromRGB(0,212,170),Outline=true,Visible=true,Font=Drawing.Fonts.System})
+
+local TabNames = {"MAIN","CONFIG","TIERS"}
+local TabTxts  = {}
+for i,n in ipairs(TabNames) do
+    TabTxts[i] = D("Text",{Text=n,Size=15,Color=Color3.fromRGB(180,180,180),Outline=true,Visible=true,Font=Drawing.Fonts.System})
+end
+
+local MAXS = 15
+local SLabel,SCheck,SFill = {},{},{}
+for i=1,MAXS do
+    SLabel[i] = D("Text",  {Text="",Size=14,Color=Color3.fromRGB(190,190,195),Outline=true,Visible=false,Font=Drawing.Fonts.System})
+    SCheck[i] = D("Circle",{Radius=8,Thickness=2,Color=Color3.fromRGB(0,212,170),Filled=false,Visible=false})
+    SFill[i]  = D("Circle",{Radius=5,Color=Color3.fromRGB(0,212,170),Filled=true,Visible=false})
+end
+local StatusTxt = D("Text",{Text="Status: OK",Size=11,Color=Color3.fromRGB(70,70,80),Outline=true,Visible=true,Font=Drawing.Fonts.System})
+
+-- ======================================================================
+-- FEATURE SYSTEM
+-- ======================================================================
+local F          = {}
+local featureMap = {}
+local uniqueTiers = {}
+
+local function updateFeatureMap()
+    table.clear(featureMap)
+    for _,f in ipairs(F) do featureMap[f.key] = f.value end
+end
+local function feat(tab,key,label,kind,value)
+    local f = {tab=tab,key=key,label=label,kind=kind,value=value}
+    table.insert(F,f); featureMap[key]=value; return f
+end
+local function getFeatureValue(key,default)
+    local v = featureMap[key]
+    if v ~= nil then return v end
+    return default
+end
+
+feat(1,"esp_enabled","ENABLE CRYSTAL ESP","toggle",true)
+feat(1,"rescan","RESCAN CRYSTALS","action",nil)
+feat(2,"min_value","MIN VALUE: 0","action",0)
+feat(2,"max_dist","MAX DISTANCE: 500","action",500)
+feat(2,"max_weight","MAX WEIGHT: 1000","action",1000)
+
+_G.selected_tp_tier = _G.selected_tp_tier or nil
+
+local function rebuildTierFeatures()
+    for i=#F,1,-1 do
+        local f=F[i]
+        if f.tab==3 or (f.tab==1 and (string.sub(f.key,1,7)=="tp_sel_" or f.key=="tp_action")) then
+            table.remove(F,i)
+        end
+    end
+    for tierName in pairs(uniqueTiers) do
+        feat(3,"tier_"..tierName,"SHOW "..string.upper(tierName),"toggle",true)
+    end
+    feat(3,"select_all_tiers","SELECT ALL TIERS","action",nil)
+    feat(3,"clear_all_tiers","CLEAR ALL TIERS","action",nil)
+
+    local found = false
+    for t in pairs(uniqueTiers) do
+        if _G.selected_tp_tier == t then found=true; break end
+    end
+    if not found then _G.selected_tp_tier = next(uniqueTiers) end
+
+    for t in pairs(uniqueTiers) do
+        feat(1,"tp_sel_"..t,"TARGET: "..string.upper(t),"toggle",(_G.selected_tp_tier==t))
+    end
+    if _G.selected_tp_tier then feat(1,"tp_action","TP TO NEAREST","action",nil) end
+    updateFeatureMap()
+end
+
+local function isTierAllowed(n)
+    return getFeatureValue("tier_"..n, false)
+end
+
+-- ======================================================================
+-- ESP DRAWING POOL
+-- All Drawing objects for crystals are created ONCE here and
+-- NEVER removed unless the crystal literally leaves the workspace folder.
+-- The Heartbeat only moves/shows/hides them.
+-- ======================================================================
+-- activeCrystals[entity] = { part, tier, value, weight, Box, Text,
+--                             bv=false, tv=false,  -- last visible state
+--                             lb=0,lbx=0,lby=0,lbsz=0,  -- last box cache
+--                             lt="",ltx=0,lty=0 }  -- last text cache
+local activeCrystals = {}
+
+local function makeESPForCrystal(entity, part, tier, val, wgt)
+    if activeCrystals[entity] then return end  -- already tracked
+
+    local color = getTierColor(tier)
+    local box = Drawing.new("Square")
+    box.Filled     = false
+    box.Thickness  = 1
+    box.Color      = color
+    box.Visible    = false
+
+    local txt = Drawing.new("Text")
+    txt.Size    = 13
+    txt.Font    = Drawing.Fonts.System
+    txt.Center  = true
+    txt.Outline = true
+    txt.Color   = color
+    txt.Visible = false
+
+    activeCrystals[entity] = {
+        part   = part,
+        tier   = tier,
+        value  = val,
+        weight = wgt,
+        Box    = box,
+        Text   = txt,
+        -- cached state (raw numbers/strings to avoid Vector2/Color3 allocs)
+        bv=false, tv=false,
+        lbx=0, lby=0, lbsz=0,
+        lcr=-1, lcg=-1, lcb=-1,
+        ltx=0, lty=0, lt=""
+    }
+
+    if tier and tier ~= "Unknown" and not uniqueTiers[tier] then
+        uniqueTiers[tier] = true
+        rebuildTierFeatures()
+        uiNeedsUpdate = true
+    end
+end
+
+local function removeESPForCrystal(entity)
+    local d = activeCrystals[entity]
+    if not d then return end
+    d.Box:Remove()
+    d.Text:Remove()
+    activeCrystals[entity] = nil
+    -- clean data cache
+    if entity.Parent == nil then dataCache[d.part] = nil end
+end
+
+-- ======================================================================
+-- INITIAL SCAN (runs once, then events take over)
+-- ======================================================================
+local watchConns = {}   -- folder ChildAdded / ChildRemoved connections
+
+local function addCrystalEntity(child)
+    if activeCrystals[child] then return end
+    local part = child:FindFirstChild("MeshPart") or child:FindFirstChild("Part")
+                 or (child:IsA("BasePart") and child)
+    if not part then return end
+    local tier, val, wgt = getCrystalData(part)
+    if isInvalidTier(tier) then return end
+    makeESPForCrystal(child, part, tier, val, wgt)
+end
+
+local function initialScan()
+    local folder = game.Workspace:FindFirstChild("Things")
+    local crystalsFolder = folder and folder:FindFirstChild("Crystals")
+    if not crystalsFolder then
+        warn("[Crystal ESP] Crystals folder not found – will retry in 2s")
+        task.delay(2, initialScan)
+        return
+    end
+
+    -- Disconnect old watchers if rescan is called
+    for _,c in ipairs(watchConns) do pcall(function() c:Disconnect() end) end
+    table.clear(watchConns)
+
+    -- Remove drawings for any previously tracked entities no longer present
+    local current = {}
+    for _,child in ipairs(crystalsFolder:GetChildren()) do current[child]=true end
+    for entity in pairs(activeCrystals) do
+        if not current[entity] then removeESPForCrystal(entity) end
+    end
+
+    -- Add all current crystals
+    for child in pairs(current) do
+        addCrystalEntity(child)
+    end
+
+    rebuildTierFeatures()
+    uiNeedsUpdate = true
+    print(string.format("[Crystal ESP] Scan complete. %d crystals registered.", (function()
+        local n=0; for _ in pairs(activeCrystals) do n=n+1 end; return n
+    end)()))
+end
+
+-- ======================================================================
+-- ESP HEARTBEAT RENDERER
+-- Only does: WorldToScreen + raw number comparisons + set properties.
+-- Zero table/object allocation per frame.
+-- ======================================================================
+local function updateESP()
+    local enabled = getFeatureValue("esp_enabled", true)
+    local cam     = workspace.CurrentCamera
+    local camPos  = cam and cam.Position
+
+    if not enabled or not camPos then
+        -- hide everything quickly
+        for _,d in pairs(activeCrystals) do
+            if d.bv then d.bv=false; d.Box.Visible=false end
+            if d.tv then d.tv=false; d.Text.Visible=false end
+        end
+        return
+    end
+
+    local minVal  = getFeatureValue("min_value", 0)
+    local maxDist = getFeatureValue("max_dist", 500)
+    local maxWgt  = getFeatureValue("max_weight", 1000)
+
+    local toRemove = nil  -- lazy allocation
+
+    for entity, d in pairs(activeCrystals) do
+        -- Safety: crystal collected / destroyed
+        if not entity.Parent or not d.part.Parent then
+            if not toRemove then toRemove = {} end
+            toRemove[#toRemove+1] = entity
+        else
+            -- Filter: value / weight / tier toggle
+            local show = d.value >= minVal and d.weight <= maxWgt and isTierAllowed(d.tier)
+            if show then
+                local px,py,pz = d.part.Position.X, d.part.Position.Y, d.part.Position.Z
+                local dist = math.sqrt((px-camPos.X)^2 + (py-camPos.Y)^2 + (pz-camPos.Z)^2)
+                if dist > maxDist then show = false end
+                if show then
+                    local screenPos, onScreen = WorldToScreen(d.part.Position)
+                    if onScreen and screenPos then
+                        local bsz = math.floor(math.clamp(4500/dist, 6, 100))
+                        local sx   = math.floor(screenPos.X)
+                        local sy   = math.floor(screenPos.Y)
+                        local half = math.floor(bsz*0.5)
+                        local bx   = sx-half
+                        local by   = sy-half
+
+                        -- Box
+                        local col = getTierColor(d.tier)
+                        local cr,cg,cb = col.R,col.G,col.B
+                        if d.lbsz ~= bsz then
+                            d.lbsz = bsz
+                            d.Box.Size = Vector2.new(bsz,bsz)
+                        end
+                        if d.lbx ~= bx or d.lby ~= by then
+                            d.lbx=bx; d.lby=by
+                            d.Box.Position = Vector2.new(bx,by)
+                        end
+                        if d.lcr ~= cr or d.lcg ~= cg or d.lcb ~= cb then
+                            d.lcr=cr; d.lcg=cg; d.lcb=cb
+                            d.Box.Color  = col
+                            d.Text.Color = col
+                        end
+                        if not d.bv then d.bv=true; d.Box.Visible=true end
+
+                        -- Text
+                        local di  = math.floor(dist)
+                        local wi  = math.floor(d.weight)
+                        local tstr= d.tier.."\n$"..d.value.." ("..wi.." kg)\n["..di.." m]"
+                        if d.lt ~= tstr then
+                            d.lt = tstr
+                            d.Text.Text = tstr
+                        end
+                        local tx = sx
+                        local ty = sy+half+2
+                        if d.ltx ~= tx or d.lty ~= ty then
+                            d.ltx=tx; d.lty=ty
+                            d.Text.Position = Vector2.new(tx,ty)
+                        end
+                        if not d.tv then d.tv=true; d.Text.Visible=true end
+                    else
+                        show = false
+                    end
+                end
+            end
+            if not show then
+                if d.bv then d.bv=false; d.Box.Visible=false end
+                if d.tv then d.tv=false; d.Text.Visible=false end
+            end
+        end
+    end
+
+    if toRemove then
+        for _,e in ipairs(toRemove) do removeESPForCrystal(e) end
+    end
+end
+
+-- ======================================================================
+-- TELEPORT
+-- ======================================================================
+local function doTeleport(hrp, pos)
+    hrp.CFrame = CFrame.new(pos.X, pos.Y+3, pos.Z, 1,0,0, 0,1,0, 0,0,1)
+end
+local function teleportToNearestSelected()
+    local targetTier = _G.selected_tp_tier
+    if not targetTier then
+        pcall(function() if notify then notify("No target rarity selected!","Crystal TP",3) end end)
+        return
+    end
+    local char = LP.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        pcall(function() if notify then notify("HumanoidRootPart not found!","Crystal TP",3) end end)
+        return
+    end
+    local myPos  = hrp.Position
+    local minVal = getFeatureValue("min_value", 0)
+    local maxDist= getFeatureValue("max_dist",  500)
+    local maxWgt = getFeatureValue("max_weight",1000)
+    local nearest, nearDist = nil, math.huge
+    for _, d in pairs(activeCrystals) do
+        if d.tier == targetTier and d.value >= minVal and d.weight <= maxWgt then
+            local dist = (d.part.Position - myPos).Magnitude
+            if dist <= maxDist and dist < nearDist then
+                nearDist = dist; nearest = d.part
+            end
+        end
+    end
+    if nearest then
+        pcall(doTeleport, hrp, nearest.Position)
+        pcall(function()
+            if notify then notify(string.format("Teleported to nearest %s (%.1fm)", targetTier, nearDist),"Crystal TP",3) end
+        end)
+    else
+        pcall(function() if notify then notify("No "..targetTier.." matching filters found!","Crystal TP",3) end end)
+    end
+end
+
+-- ======================================================================
+-- KEYBOARD POLLING (UI thread)
+-- ======================================================================
+local pollKeys = { [0x0D]="enter", [0x08]="backspace", [0x1B]="escape" }
+for i=0x30,0x39 do pollKeys[i]=tostring(i-0x30) end
+for i=0x60,0x69 do pollKeys[i]=tostring(i-0x60) end
+local lastKeyState = {}
+for vk in pairs(pollKeys) do lastKeyState[vk]=false end
+
+-- ======================================================================
+-- UI DRAW HELPERS (integer-keyed state cache, no userdata weak keys)
+-- ======================================================================
+local sqC,ciC,txC = {},{},{}
+
+local function sq(obj,id, pos,size, vis, col, tr)
+    local c=sqC[id]; if not c then c={}; sqC[id]=c end
+    if c.v~=vis then c.v=vis; obj.Visible=vis end
+    if not vis then return end
+    if c.px~=pos.X or c.py~=pos.Y then c.px=pos.X; c.py=pos.Y; obj.Position=pos end
+    if c.sx~=size.X or c.sy~=size.Y then c.sx=size.X; c.sy=size.Y; obj.Size=size end
+    if col then
+        if c.cr~=col.R or c.cg~=col.G or c.cb~=col.B then
+            c.cr=col.R; c.cg=col.G; c.cb=col.B; obj.Color=col
+        end
+    end
+    if tr and c.tr~=tr then c.tr=tr; obj.Transparency=tr end
+end
+local function ci(obj,id, pos, vis, r, col)
+    local c=ciC[id]; if not c then c={}; ciC[id]=c end
+    if c.v~=vis then c.v=vis; obj.Visible=vis end
+    if not vis then return end
+    if c.px~=pos.X or c.py~=pos.Y then c.px=pos.X; c.py=pos.Y; obj.Position=pos end
+    if r and c.r~=r then c.r=r; obj.Radius=r end
+    if col then
+        if c.cr~=col.R or c.cg~=col.G or c.cb~=col.B then
+            c.cr=col.R; c.cg=col.G; c.cb=col.B; obj.Color=col
+        end
+    end
+end
+local function tx(obj,id, str, pos, col, vis)
+    local c=txC[id]; if not c then c={}; txC[id]=c end
+    if c.v~=vis then c.v=vis; obj.Visible=vis end
+    if not vis then return end
+    if c.t~=str then c.t=str; obj.Text=str end
+    if c.px~=pos.X or c.py~=pos.Y then c.px=pos.X; c.py=pos.Y; obj.Position=pos end
+    if col then
+        if c.cr~=col.R or c.cg~=col.G or c.cb~=col.B then
+            c.cr=col.R; c.cg=col.G; c.cb=col.B; obj.Color=col
+        end
+    end
+end
+local function setSlotVisible(slot, vis)
+    local cl=txC["l"..slot]; if not cl then cl={}; txC["l"..slot]=cl end
+    if cl.v~=vis then cl.v=vis; SLabel[slot].Visible=vis end
+    local cc=ciC["k"..slot]; if not cc then cc={}; ciC["k"..slot]=cc end
+    if cc.v~=vis then cc.v=vis; SCheck[slot].Visible=vis end
+    local cf=ciC["f"..slot]; if not cf then cf={}; ciC["f"..slot]=cf end
+    if cf.v~=vis then cf.v=vis; SFill[slot].Visible=vis end
+end
+
+local GREEN = Color3.fromRGB(0,212,170)
+local GREY  = Color3.fromRGB(190,190,195)
+local DIM   = Color3.fromRGB(140,140,145)
+local DARK  = Color3.fromRGB(70,70,80)
+local LTGRN = Color3.fromRGB(120,255,120)
+
+-- ======================================================================
+-- UI THREAD — owns its thread entirely
+-- ======================================================================
+task.spawn(function()
+    while ScriptActive do
+        task.wait(0.016)  -- ~60fps for UI, smooth as butter
+
+        local mx,my = 0,0
+        if Mouse then mx,my = Mouse.X,Mouse.Y end
+        local m1 = safeKey(0x01)
+
+        -- Keyboard (typing mode)
+        if typing then
+            for vk,char in pairs(pollKeys) do
+                local down = safeKey(vk)
+                if down and not lastKeyState[vk] then
+                    if char == "enter" then
+                        typing = false
+                        local num = tonumber(typeBuffer) or 0
+                        for _,f in ipairs(F) do
+                            if f.key == typingKey then
+                                f.value = num
+                                featureMap[f.key] = num
+                                if typingKey == "min_value"  then f.label = "MIN VALUE: "..num
+                                elseif typingKey == "max_dist"  then f.label = "MAX DISTANCE: "..num
+                                elseif typingKey == "max_weight" then f.label = "MAX WEIGHT: "..num
+                                end
+                                break
+                            end
+                        end
+                        typeBuffer=""; typingKey=nil; uiNeedsUpdate=true
+                    elseif char == "escape" then
+                        typing = false
+                        for _,f in ipairs(F) do
+                            if f.key == typingKey then
+                                if typingKey == "min_value"  then f.label = "MIN VALUE: "..f.value
+                                elseif typingKey == "max_dist"  then f.label = "MAX DISTANCE: "..f.value
+                                elseif typingKey == "max_weight" then f.label = "MAX WEIGHT: "..f.value
+                                end
+                                break
+                            end
+                        end
+                        typeBuffer=""; typingKey=nil; uiNeedsUpdate=true
+                    elseif char == "backspace" then
+                        if #typeBuffer > 0 then typeBuffer = string.sub(typeBuffer,1,#typeBuffer-1) end
+                    else
+                        if #typeBuffer < 10 then typeBuffer = typeBuffer..char end
+                    end
+                end
+                lastKeyState[vk] = down
+            end
+        end
+
+        -- Mouse click
+        if m1 and not lastM1 then
+            -- Tab click
+            for i=1,#TabNames do
+                local tx2 = uiPos.X+10+((i-1)*125)
+                if mx>=tx2 and mx<=tx2+110 and my>=uiPos.Y+34 and my<=uiPos.Y+64 then
+                    activeTab=i; uiNeedsUpdate=true
+                end
+            end
+            -- Feature click
+            local slot=0
+            for _,f in ipairs(F) do
+                if f.tab == activeTab then
+                    slot=slot+1
+                    if slot<=MAXS then
+                        local yy=uiPos.Y+75+((slot-1)*26)
+                        if mx>=uiPos.X+10 and mx<=uiPos.X+uiSize.X-10 and my>=yy-2 and my<=yy+24 then
+                            if f.kind=="toggle" then
+                                if string.sub(f.key,1,7)=="tp_sel_" then
+                                    _G.selected_tp_tier=string.sub(f.key,8)
+                                    rebuildTierFeatures()
+                                else
+                                    f.value = not f.value
+                                    featureMap[f.key] = f.value
+                                end
+                                uiNeedsUpdate=true
+                            elseif f.kind=="action" then
+                                if f.key=="min_value" or f.key=="max_dist" or f.key=="max_weight" then
+                                    if not typing then
+                                        typing=true; typingKey=f.key
+                                        typeBuffer=tostring(f.value)
+                                        f.label="TYPING: "..typeBuffer.."_"
+                                        uiNeedsUpdate=true
+                                    end
+                                elseif f.key=="tp_action" then
+                                    teleportToNearestSelected()
+                                elseif f.key=="rescan" then
+                                    task.spawn(initialScan)
+                                    pcall(function() if notify then notify("Rescanning...","Crystal ESP",2) end end)
+                                    uiNeedsUpdate=true
+                                elseif f.key=="select_all_tiers" then
+                                    for _,tf in ipairs(F) do
+                                        if tf.tab==3 and string.sub(tf.key,1,5)=="tier_" then
+                                            tf.value=true; featureMap[tf.key]=true
+                                        end
+                                    end; uiNeedsUpdate=true
+                                elseif f.key=="clear_all_tiers" then
+                                    for _,tf in ipairs(F) do
+                                        if tf.tab==3 and string.sub(tf.key,1,5)=="tier_" then
+                                            tf.value=false; featureMap[tf.key]=false
+                                        end
+                                    end; uiNeedsUpdate=true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- Drag start
+            if mx>=uiPos.X and mx<=uiPos.X+uiSize.X and my>=uiPos.Y and my<=uiPos.Y+30 then
+                dragging=true; dragOff=Vector2.new(mx-uiPos.X,my-uiPos.Y)
+            end
+        end
+
+        if dragging then
+            if m1 then
+                local np=Vector2.new(mx-dragOff.X,my-dragOff.Y)
+                if np.X~=uiPos.X or np.Y~=uiPos.Y then uiPos=np; uiNeedsUpdate=true end
+            else dragging=false end
+        end
+        lastM1=m1
+
+        -- Render UI (only when something changed or cursor blinks)
+        if uiNeedsUpdate or typing then
+            uiNeedsUpdate = false
+
+            sq(Shadow, "shd", Vector2.new(uiPos.X-3,uiPos.Y-3), Vector2.new(uiSize.X+6,uiSize.Y+6), true, nil, 0.35)
+            sq(MainBG, "bg",  uiPos, uiSize, true)
+            sq(TopBar, "top", uiPos, Vector2.new(uiSize.X,30), true)
+            sq(AccLine,"acc", Vector2.new(uiPos.X,uiPos.Y+30), Vector2.new(uiSize.X,2), true, GREEN)
+            tx(TitleTxt,"ttl","MATCHA // CRYSTAL ESP",Vector2.new(uiPos.X+10,uiPos.Y+8),GREEN,true)
+
+            for i,lbl in ipairs(TabTxts) do
+                tx(lbl,"tab"..i, TabNames[i], Vector2.new(uiPos.X+20+((i-1)*125),uiPos.Y+40),
+                   (i==activeTab) and GREEN or DIM, true)
+            end
+
+            if typing then
+                local cursor=(math.floor(tick()*2.5)%2==0) and "_" or ""
+                for _,f in ipairs(F) do
+                    if f.key==typingKey then f.label="TYPING: "..typeBuffer..cursor end
+                end
+            end
+
+            local slot=0
+            for _,f in ipairs(F) do
+                if f.tab==activeTab then
+                    slot=slot+1
+                    if slot<=MAXS then
+                        local yy=uiPos.Y+75+((slot-1)*26)
+                        local pre=(f.kind=="action") and ">> " or "> "
+                        local str=pre..tostring(f.label)
+                        local col=(f.kind=="action") and GREEN or (f.value and LTGRN or GREY)
+                        tx(SLabel[slot],"l"..slot, str, Vector2.new(uiPos.X+16,yy), col, true)
+                        local isT=(f.kind=="toggle")
+                        local cp=Vector2.new(uiPos.X+uiSize.X-22,yy+7)
+                        ci(SCheck[slot],"k"..slot, cp, isT, 8, GREEN)
+                        ci(SFill[slot], "f"..slot, cp, (isT and f.value==true), 5, GREEN)
+                    end
+                end
+            end
+            for i=slot+1,MAXS do setSlotVisible(i,false) end
+
+            tx(StatusTxt,"sts",
+               "ESP: "..(getFeatureValue("esp_enabled",true) and "ACTIVE" or "DISABLED")..
+               " | Crystals: "..(function() local n=0; for _ in pairs(activeCrystals) do n=n+1 end; return n end)(),
+               Vector2.new(uiPos.X+10,uiPos.Y+uiSize.Y-16), DARK, true)
+        end
+    end
+end)
+
+-- ======================================================================
+-- ESP HEARTBEAT — lean as possible, just move existing Drawing objects
+-- ======================================================================
+local lastESP = 0
+local conn = RunService.Heartbeat:Connect(function()
+    if not ScriptActive then return end
+    local now = tick()
+    if now - lastESP < 0.05 then return end  -- 20fps cap
+    lastESP = now
+    local ok,err = pcall(updateESP)
+    if not ok then warn("[Crystal ESP] Heartbeat error: "..tostring(err)) end
+end)
+
+-- ======================================================================
+-- STARTUP & CLEANUP
+-- ======================================================================
+initialScan()
+
+_G.CrystalESPCleanup = function()
+    ScriptActive = false
+    task.wait(0.05)
+    for _,c in ipairs(watchConns) do pcall(function() c:Disconnect() end) end
+    pcall(function() conn:Disconnect() end)
+    for _,d in pairs(activeCrystals) do
+        pcall(function() d.Box:Remove() end)
+        pcall(function() d.Text:Remove() end)
+    end
+    for _,obj in ipairs(drawObjs) do
+        pcall(function() obj:Remove() end)
+    end
+    table.clear(activeCrystals)
+    table.clear(dataCache)
+    print("[Crystal ESP] Cleanup complete.")
+end
+
+pcall(function()
+    if notify then notify("Crystal ESP Loaded!","Crystal ESP",4) end
+end)
